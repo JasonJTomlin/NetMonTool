@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Monitor</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --border: #e2e5ea;
+    --accent: #2563eb; --online: #16a34a; --offline: #9aa3ae; --new: #d97706; --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --text: #e6e9ee; --muted: #8b95a3; --border: #262c35;
+      --accent: #60a5fa; --online: #22c55e; --offline: #5b6470; --new: #f59e0b; --danger: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  button { font: inherit; border: 1px solid var(--border); background: var(--panel); color: var(--text);
+           padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .6; cursor: default; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+          cursor: pointer; text-align: left; }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card .n { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .l { color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  input[type=search] { flex: 1; min-width: 180px; font: inherit; padding: 7px 10px; border-radius: 8px;
+                       border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+  .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  tr.off td { color: var(--muted); }
+  .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--offline); }
+  .on .dot { background: var(--online); box-shadow: 0 0 0 3px color-mix(in srgb, var(--online) 25%, transparent); }
+  .badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 6px; }
+  .badge.new { background: color-mix(in srgb, var(--new) 18%, transparent); color: var(--new); }
+  .badge.me { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .name input { font: inherit; color: var(--text); background: transparent; border: 1px solid transparent;
+                border-radius: 6px; padding: 3px 6px; margin-left: -7px; width: 190px; }
+  .name input:hover, .name input:focus { border-color: var(--border); background: var(--bg); outline: none; }
+  .host { color: var(--muted); font-size: 12px; }
+  .actions button { padding: 3px 9px; font-size: 12px; }
+  .actions button.forget:hover { border-color: var(--danger); color: var(--danger); }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Network Monitor</h1>
+      <div class="sub" id="meta">Loading…</div>
+    </div>
+    <div style="display:flex; gap:8px">
+      <button id="ackAll">Mark all seen</button>
+      <button class="primary" id="scanBtn">Scan now</button>
+    </div>
+  </header>
+
+  <div class="cards">
+    <button class="card active" data-filter="all"><div class="n" id="cAll">–</div><div class="l">Known devices</div></button>
+    <button class="card" data-filter="online"><div class="n" id="cOn">–</div><div class="l">Online</div></button>
+    <button class="card" data-filter="offline"><div class="n" id="cOff">–</div><div class="l">Offline</div></button>
+    <button class="card" data-filter="new"><div class="n" id="cNew">–</div><div class="l">New devices</div></button>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="q" placeholder="Filter by name, IP or MAC">
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Status</th><th>Name</th><th>IP address</th><th>MAC address</th><th>First seen</th><th>Last seen</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No devices match.</div>
+  </div>
+</main>
+
+<script>
+let data = { devices: [] }, filter = "all", pollTimer;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function ago(iso) {
+  if (!iso) return "never";
+  const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+const api = (path, opts = {}) => fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+
+async function load() {
+  clearTimeout(pollTimer);
+  try {
+    data = await (await api("/api/devices")).json();
+    render();
+  } catch (e) {
+    document.getElementById("meta").textContent = "Can't reach the netmon server.";
+  }
+  pollTimer = setTimeout(load, data.scanning ? 2000 : 10000);
+}
+
+function render() {
+  const d = data.devices;
+  document.getElementById("cAll").textContent = d.length;
+  document.getElementById("cOn").textContent = d.filter(x => x.online).length;
+  document.getElementById("cOff").textContent = d.filter(x => !x.online).length;
+  document.getElementById("cNew").textContent = d.filter(x => x.is_new).length;
+
+  document.getElementById("meta").textContent =
+    `${data.subnet} · ${data.scanning ? "Scanning…" : "Last scan " + ago(data.last_scan)} · rescans every ${data.interval}s`;
+  const btn = document.getElementById("scanBtn");
+  btn.disabled = data.scanning;
+  btn.textContent = data.scanning ? "Scanning…" : "Scan now";
+
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const shown = d.filter(x =>
+    (filter === "all" || (filter === "online" && x.online) || (filter === "offline" && !x.online) || (filter === "new" && x.is_new)) &&
+    (!q || [x.label, x.hostname, x.ip, x.mac].some(v => (v || "").toLowerCase().includes(q))));
+
+  // Don't redraw under the user while they're editing a name.
+  if (document.activeElement?.matches(".name input")) return;
+
+  document.getElementById("rows").innerHTML = shown.map(x => `
+    <tr class="${x.online ? "" : "off"}">
+      <td><span class="status ${x.online ? "on" : ""}"><span class="dot"></span>${x.online ? "Online" : "Offline"}</span></td>
+      <td class="name">
+        <input value="${esc(x.label)}" placeholder="${esc(x.hostname || "Unnamed device")}" data-id="${x.id}" aria-label="Device name">
+        ${x.is_self ? '<span class="badge me">This PC</span>' : ""}${x.is_new ? '<span class="badge new">NEW</span>' : ""}
+        ${x.label && x.hostname ? `<div class="host">${esc(x.hostname)}</div>` : ""}
+      </td>
+      <td class="mono">${esc(x.ip)}</td>
+      <td class="mono">${esc(x.mac || "—")}</td>
+      <td title="${esc(x.first_seen)}">${ago(x.first_seen)}</td>
+      <td title="${esc(x.last_seen)}">${x.online ? "now" : ago(x.last_seen)}</td>
+      <td class="actions">
+        ${x.is_new ? `<button data-ack="${x.id}">Seen</button>` : ""}
+        <button class="forget" data-forget="${x.id}" title="Remove from the list">Forget</button>
+      </td>
+    </tr>`).join("");
+  document.getElementById("empty").hidden = shown.length > 0;
+}
+
+document.getElementById("scanBtn").onclick = async () => {
+  await api("/api/scan", { method: "POST" });
+  data.scanning = true;
+  render();
+  setTimeout(load, 500);
+};
+document.getElementById("ackAll").onclick = async () => { await api("/api/devices/ack", { method: "POST" }); load(); };
+document.getElementById("q").oninput = render;
+
+document.querySelectorAll(".card").forEach(c => c.onclick = () => {
+  document.querySelectorAll(".card").forEach(x => x.classList.toggle("active", x === c));
+  filter = c.dataset.filter;
+  render();
+});
+
+const rows = document.getElementById("rows");
+rows.addEventListener("click", async e => {
+  const ack = e.target.dataset.ack, forget = e.target.dataset.forget;
+  if (ack) { await api(`/api/devices/${ack}/ack`, { method: "POST" }); load(); }
+  if (forget && confirm("Forget this device? It will reappear as new if it's seen again.")) {
+    await api(`/api/devices/${forget}`, { method: "DELETE" }); load();
+  }
+});
+rows.addEventListener("change", async e => {
+  if (!e.target.matches(".name input")) return;
+  await api(`/api/devices/${e.target.dataset.id}/label`, { method: "POST", body: JSON.stringify({ label: e.target.value }) });
+  e.target.blur();
+  load();
+});
+rows.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".name input")) e.target.blur(); });
+
+load();
+</script>
+</body>
+</html>
