@@ -12,7 +12,7 @@ from flask import Flask, abort, jsonify, render_template, request
 
 from . import scanner, speedtest
 from .notify import Notifier
-from .store import DeviceStore, ScanChanges
+from .store import HISTORY_DAYS, DeviceStore, ScanChanges
 from .vendors import VendorDB
 
 log = logging.getLogger("netmon")
@@ -173,6 +173,11 @@ def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> F
     @app.get("/api/events")
     def events():
         return jsonify(events=store.recent_events(min(request.args.get("limit", 25, type=int), 200)))
+
+    @app.get("/api/speedtests")
+    def speedtest_history():
+        days = min(max(request.args.get("days", 7, type=float), 1 / 24), HISTORY_DAYS)
+        return jsonify(tests=store.speedtests(days), days=days, interval_hours=speed.interval_hours())
 
     @app.post("/api/speedtest")
     def speedtest_now():

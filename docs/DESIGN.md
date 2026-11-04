@@ -226,11 +226,11 @@ row, so a phone that naps through one scan doesn't trigger one.
   repeats it (up to 4 times) and pools the repeats into one sample. A test is capped at about
   220 MB in total and takes 10–20 s. If a later step is refused, the result so far is kept.
 - `SpeedTester` has its own thread, so a test never delays a network scan. It runs every
-  `speedtest_hours` (default 3; 0 = only on *Test now*), waits 30 s after startup so the first
+  `speedtest_hours` (default 3; 0.25 and 0.5 give 15 and 30 minutes; 0 = only on *Test now*), waits 30 s after startup so the first
   scan isn't competing for bandwidth, and rechecks the schedule every 60 s so a changed setting
   takes effect within a minute. A failed test is stored with its error, shown in red on the
   dashboard, and retried at the next interval.
-- There are no speed alerts yet. The dashboard shows the latest result only.
+- There are no speed alerts yet. History is kept for 30 days, like the rest.
 
 **Settings** (the *Settings…* dialog, stored in `meta`)
 
@@ -241,7 +241,7 @@ row, so a phone that naps through one scan doesn't trigger one.
 | Internet connection drops | On | Down and restored alerts |
 | Desktop notifications | On | Deliver as a desktop notification |
 | Webhook URL | Empty | Also POST to this URL (http/https only) |
-| Speed test | Every 3 hours | How often to run the speed test: off, 1, 3, 6, 12 or 24 hours |
+| Speed test | Every 3 hours | How often to run the speed test: off, 15 or 30 minutes, or 1, 3, 6, 12 or 24 hours. The dialog shows the worst-case daily data use (220 MB × tests per day, about 21 GB at 15 minutes) and warns above 5 GB |
 
 **Delivery channels** (`notify.py`)
 
@@ -267,6 +267,7 @@ The dashboard is one static page that polls a small JSON API every 10 seconds, o
 | --- | --- | --- |
 | GET | `/` | The dashboard page |
 | GET | `/api/devices` | All devices with 24h uptime, internet/router status, latest speed test (and whether one is running), last scan time, scanning flag, subnet, interval |
+| GET | `/api/speedtests?days=7` | Every speed test in the last 1–30 days, oldest first, including failures |
 | POST | `/api/speedtest` | Run a speed test now |
 | GET | `/api/devices/<id>/history` | 24h and 7d uptime, 24h latency samples, last 15 status changes |
 | GET | `/api/events?limit=25` | Recent activity across the network (max 200) |
@@ -288,6 +289,22 @@ external libraries)
   24-hour latency sparkline. *Internet speed* shows the latest download/upload in Mbps, when it
   was tested, the schedule, and a *Test now* button; a failed test shows red with its reason.
   *Router* shows its address and latency.
+- **Speed history** (click the *Internet speed* box, or its title from the keyboard): a large
+  panel with a 24 hours / 7 days / 30 days range switch (remembered per browser) and its own
+  *Test now*.
+    - **Tiles:** latest result, average, download range (slowest and fastest), and test count
+      with failures.
+    - **Chart:** download and upload on one shared Mbps axis, since they're the same measure, so
+      there's no dual axis. Lines break at failed tests, and at gaps of more than three scheduled
+      intervals (for example, while the PC was off). Failed tests are red ticks on the baseline.
+      Markers show only up to 60 points. The ends are direct-labelled, and a hover crosshair and
+      tooltip read out each test.
+    - **Table:** every test, newest first, which also serves as the chart's accessible text
+      view.
+    - **Colours:** download blue `#2a78d6` / `#3987e5` and upload orange `#eb6834` / `#d95926`
+      (light / dark), checked with the dataviz palette validator on both panel surfaces: CVD
+      ΔE ≥ 24, contrast ≥ 3:1.
+  - The panel refreshes itself when a new result comes in.
 - **Count cards:** Known, Online, Offline, New and Watched. Each card is also a filter.
 - **Device table:** status, editable name with badges (This PC, NEW, Private MAC), IP, MAC,
   latency, 24h uptime, online for (time since it last came online), last seen, and buttons for
@@ -379,6 +396,7 @@ All testing so far has been manual or done with ad hoc scripts on the developmen
 | Pause alerts | Notifier test | Real alerts suppressed while paused; test alert still delivered |
 | Tray menu clicks | Not automated | Needs a manual check |
 | Speed test | Live, CLI and dashboard | First scheduled test ran 30 s after start; *Test now* gave 149 Mbps down / 37.1 up in about 15 s; a refused 100 MB download was found and replaced by repeats; failure state and schedule setting work |
+| Speed history | Browser, test database seeded with a week of sample results | Opens by mouse and keyboard; all three ranges, hover readout, line breaks at failures, table and tiles correct; 15/30-minute schedules save, label and time correctly; no console errors |
 
 ## Known limitations
 

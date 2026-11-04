@@ -131,6 +131,37 @@
   dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
   dialog .row .left { margin-right: auto; }
   #testResult { color: var(--muted); font-size: 13px; align-self: center; }
+
+  /* Speed history. Series colours pass the dataviz palette checks on both panel surfaces. */
+  :root { --down: #2a78d6; --up: #eb6834; }
+  @media (prefers-color-scheme: dark) { :root { --down: #3987e5; --up: #d95926; } }
+  #speed { cursor: pointer; }
+  #speed:hover { border-color: var(--accent); }
+  button.linkish { all: unset; cursor: pointer; font-weight: 600; }
+  button.linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  dialog.wide { width: min(940px, calc(100vw - 32px)); }
+  .sd-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+  .sd-head h3 { margin: 0; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-left: auto; }
+  .seg button { border: 0; border-radius: 0; padding: 5px 12px; font-size: 13px; background: transparent; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed=true] { background: var(--accent); color: #fff; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+  .tile .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 2px 0; white-space: nowrap; }
+  .tile .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .tile .s { color: var(--muted); font-size: 12px; }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .chart-wrap { position: relative; }
+  .chart-wrap svg { display: block; width: 100%; }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+         padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgb(0 0 0 / .2); white-space: nowrap; z-index: 2; }
+  .tip b { font-variant-numeric: tabular-nums; }
+  .sd-table { max-height: 260px; overflow: auto; margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; }
+  .sd-table th { position: sticky; top: 0; background: var(--panel); }
+  .sd-empty { padding: 48px 0; text-align: center; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -200,6 +231,8 @@
     <div class="field" style="margin-top:4px">
       <select name="speedtest_hours" aria-label="How often to test internet speed">
         <option value="0">Off (only when I click Test now)</option>
+        <option value="0.25">Every 15 minutes</option>
+        <option value="0.5">Every 30 minutes</option>
         <option value="1">Every hour</option>
         <option value="3">Every 3 hours</option>
         <option value="6">Every 6 hours</option>
@@ -207,6 +240,7 @@
         <option value="24">Once a day</option>
       </select>
       <div class="sub" style="margin-top:4px">Each test takes 10–20 seconds and transfers up to about 220 MB (less on slower connections), using Cloudflare's speed-test servers.</div>
+      <div class="sub" id="speedUsage" style="margin-top:4px"></div>
     </div>
     <div class="row">
       <button type="button" class="left" id="testBtn">Send test alert</button>
@@ -215,6 +249,19 @@
       <button class="primary" id="saveSettings" value="save">Save</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="speedDialog" class="wide" aria-labelledby="sdTitle">
+  <div class="sd-head">
+    <h3 id="sdTitle">Internet speed</h3>
+    <span class="sub" id="sdSchedule"></span>
+    <div class="seg" role="group" aria-label="Time range">
+      <button data-days="1">24 hours</button><button data-days="7">7 days</button><button data-days="30">30 days</button>
+    </div>
+    <button id="sdTest">Test now</button>
+    <button id="sdClose" class="primary">Close</button>
+  </div>
+  <div id="sdBody"></div>
 </dialog>
 
 <script>
@@ -316,6 +363,7 @@ async function load() {
     [data, { events }] = await Promise.all([api("/api/devices").then(r => r.json()), api("/api/events").then(r => r.json())]);
     render();
     expanded.forEach(loadHistory);
+    if ($("speedDialog").open && data.speed?.latest?.ts !== speedHistTs) loadSpeedHistory();
   } catch (e) {
     $("meta").textContent = "Can't reach the netmon server.";
   }
@@ -511,28 +559,199 @@ colList.addEventListener("dragend", () => { dragKey = null; clearDropMarks(); })
 // 8.45, 41.2, 312 - three significant figures reads well at every speed.
 const mbps = v => v == null ? "—" : v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
 
+const everyText = h => !h ? "scheduled tests off" : h < 1 ? `every ${Math.round(h * 60)} minutes`
+  : h === 1 ? "every hour" : `every ${h} hours`;
+
 function renderSpeed() {
   const s = data.speed || {}, t = s.latest, failed = t?.error;
-  const every = s.interval_hours ? `every ${s.interval_hours === 1 ? "hour" : s.interval_hours + " hours"}` : "scheduled tests off";
+  const every = everyText(s.interval_hours);
   const line = s.running ? "Testing, 10–20 s…"
     : !t ? "Not tested yet"
     : failed ? `Last test failed ${ago(t.ts)}`
     : `<span class="speeds">↓ <b>${mbps(t.down_mbps)}</b> · ↑ <b>${mbps(t.up_mbps)}</b> Mbps</span>`;
   $("speed").innerHTML = `
     <span class="dot ${s.running || !t ? "" : failed ? "down" : "on"}"></span>
-    <div><div class="what">Internet speed</div>
+    <div><div class="what"><button class="linkish" id="speedOpen" title="Show speed history">Internet speed ›</button></div>
     <div class="stats">${line}</div>
     <div class="stats" ${failed ? `title="${esc(t.error)}"` : ""}>${t && !s.running ? (failed ? `${esc(t.error)} · ` : `Tested ${ago(t.ts)} · `) : ""}${every}</div></div>
     <button id="speedBtn" ${s.running ? "disabled" : ""}>${s.running ? "Testing…" : "Test now"}</button>`;
+  $("sdSchedule").textContent = s.running ? "Testing now, 10–20 s…" : `Tests ${every}`;
+  $("sdTest").disabled = !!s.running;
+  $("sdTest").textContent = s.running ? "Testing…" : "Test now";
 }
 
-$("speed").addEventListener("click", async e => {
-  if (e.target.id !== "speedBtn") return;
+async function startSpeedTest() {
   await api("/api/speedtest", { method: "POST" });
   data.speed = { ...data.speed, running: true };
   renderSpeed();
   setTimeout(load, 1000);
+}
+// The whole box opens the history; only its Test now button does something else.
+$("speed").addEventListener("click", e => {
+  if (e.target.closest("#speedBtn")) return startSpeedTest();
+  openSpeedHistory();
 });
+
+// ---- speed history
+let speedRange = 7, speedTests = [], speedHistTs;
+try { const r = Number(localStorage.getItem("netmon.speedRange")); if ([1, 7, 30].includes(r)) speedRange = r; } catch {}
+const when2 = ms => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+function niceStep(x) {
+  const p = 10 ** Math.floor(Math.log10(x)), f = x / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
+// Local-time ticks: every 4 hours for a day, daily for a week, every 5 days for a month.
+function timeTicks(t0, t1, days) {
+  const d = new Date(t0), ticks = [];
+  d.setMinutes(0, 0, 0);
+  if (days <= 1) { while (d.getHours() % 4) d.setHours(d.getHours() + 1); }
+  else { d.setHours(0); d.setDate(d.getDate() + 1); }
+  for (; +d <= t1; days <= 1 ? d.setHours(d.getHours() + 4) : d.setDate(d.getDate() + (days <= 7 ? 1 : 5)))
+    if (+d >= t0) ticks.push(+d);
+  return ticks;
+}
+const tickLabel = (ms, days) => days <= 1 ? new Date(ms).toLocaleTimeString([], { hour: "numeric" })
+  : new Date(ms).toLocaleDateString([], days <= 7 ? { weekday: "short", day: "numeric" } : { month: "short", day: "numeric" });
+
+async function openSpeedHistory() {
+  if (!$("speedDialog").open) $("speedDialog").showModal();
+  await loadSpeedHistory();
+}
+async function loadSpeedHistory() {
+  document.querySelectorAll("#speedDialog .seg button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.days) === speedRange)));
+  const res = await (await api(`/api/speedtests?days=${speedRange}`)).json();
+  speedTests = res.tests.map(t => ({ ...t, ms: Date.parse(t.ts) }));
+  speedHistTs = data.speed?.latest?.ts;
+  renderSpeedHistory();
+}
+
+function stat(label, value, sub) {
+  return `<div class="tile"><div class="l">${label}</div><div class="v">${value}</div><div class="s">${sub}</div></div>`;
+}
+const pair = (d, u) => `↓ ${mbps(d)} · ↑ ${mbps(u)} <small>Mbps</small>`;
+
+function renderSpeedHistory() {
+  const tests = speedTests, ok = tests.filter(t => !t.error), failed = tests.length - ok.length;
+  const range = { 1: "24 hours", 7: "7 days", 30: "30 days" }[speedRange];
+  if (!tests.length) {
+    $("sdBody").innerHTML = `<div class="sd-empty">No speed tests in the last ${range} yet. Use <b>Test now</b>, or set a schedule in Settings.</div>`;
+    return;
+  }
+  const avg = k => ok.reduce((s, t) => s + t[k], 0) / ok.length;
+  const last = ok.at(-1), slow = ok.reduce((a, t) => t.down_mbps < a.down_mbps ? t : a, ok[0] || {});
+  const fast = ok.reduce((a, t) => t.down_mbps > a.down_mbps ? t : a, ok[0] || {});
+  const tiles = ok.length ? [
+    stat("Latest", pair(last.down_mbps, last.up_mbps), ago(last.ts)),
+    stat(`Average, ${range}`, pair(avg("down_mbps"), avg("up_mbps")), `over ${ok.length} test${ok.length === 1 ? "" : "s"}`),
+    stat("Download range", `${mbps(slow.down_mbps)}–${mbps(fast.down_mbps)} <small>Mbps</small>`, `slowest ${when(slow.ts)}`),
+    stat("Tests", tests.length, failed ? `<span style="color:var(--danger)">●</span> ${failed} failed` : "none failed"),
+  ] : [stat("Tests", tests.length, `<span style="color:var(--danger)">●</span> all ${failed} failed`)];
+
+  $("sdBody").innerHTML = `
+    <div class="tiles">${tiles.join("")}</div>
+    <div class="legend">
+      <span><span class="key" style="background:var(--down)"></span>Download</span>
+      <span><span class="key" style="background:var(--up)"></span>Upload</span>
+      ${failed ? '<span><span class="key" style="background:var(--danger);width:3px"></span>Failed test</span>' : ""}
+    </div>
+    <div class="chart-wrap" id="sdChart"></div>
+    <div class="sd-table"><table>
+      <thead><tr><th>Time</th><th>Download</th><th>Upload</th><th>Result</th></tr></thead>
+      <tbody>${tests.slice().reverse().slice(0, 300).map(t => `<tr>
+        <td>${esc(when2(t.ms))}</td>
+        <td class="num">${t.error ? "—" : mbps(t.down_mbps) + " Mbps"}</td>
+        <td class="num">${t.error ? "—" : mbps(t.up_mbps) + " Mbps"}</td>
+        <td>${t.error ? `<span style="color:var(--danger)">●</span> Failed: ${esc(t.error)}` : "OK"}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+  drawSpeedChart();
+}
+
+// Download and upload share one Mbps axis (same measure, so no dual axis). Lines break across
+// failed tests and across gaps of more than three scheduled intervals (e.g. the PC was off).
+function drawSpeedChart() {
+  const wrap = $("sdChart");
+  if (!wrap) return;
+  const W = Math.max(320, wrap.clientWidth), H = 272, m = { l: 44, r: 72, t: 28, b: 28 };
+  const t1 = Date.now(), t0 = t1 - speedRange * 864e5;
+  const tests = speedTests.filter(t => t.ms >= t0), ok = tests.filter(t => !t.error);
+  const step = niceStep(Math.max(10, ...ok.flatMap(t => [t.down_mbps, t.up_mbps])) / 4), max = step * 4;
+  const X = ms => m.l + (ms - t0) / (t1 - t0) * (W - m.l - m.r);
+  const Y = v => H - m.b - v / max * (H - m.t - m.b);
+  const gap = data.speed?.interval_hours ? data.speed.interval_hours * 3 * 36e5 : Infinity;
+  const line = k => {
+    let d = "", prev = null;
+    for (const t of tests) {
+      if (t.error) { prev = null; continue; }
+      d += `${prev && t.ms - prev.ms <= gap ? "L" : "M"}${X(t.ms).toFixed(1)},${Y(t[k]).toFixed(1)}`;
+      prev = t;
+    }
+    return d;
+  };
+  const dots = ok.length <= 60;
+  const marks = k => dots ? ok.map(t => `<circle cx="${X(t.ms).toFixed(1)}" cy="${Y(t[k]).toFixed(1)}" r="4" fill="var(--${k === "down_mbps" ? "down" : "up"})" stroke="var(--panel)" stroke-width="2"/>`).join("") : "";
+  // Direct labels at the right end, nudged apart if they'd collide.
+  const last = ok.at(-1);
+  let yd = last && Y(last.down_mbps), yu = last && Y(last.up_mbps);
+  if (last && Math.abs(yd - yu) < 14) { const mid = (yd + yu) / 2; yd = mid - 7; yu = mid + 7; }
+  const yTicks = [0, 1, 2, 3, 4].map(i => i * step);
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Download and upload speed over the last ${speedRange === 1 ? "24 hours" : speedRange + " days"}">
+    ${yTicks.map(v => `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--border)"/>
+      <text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}</text>`).join("")}
+    <text x="${m.l - 8}" y="${m.t - 14}" text-anchor="end" font-size="11" fill="var(--muted)">Mbps</text>
+    ${timeTicks(t0, t1, speedRange).map(ms => `<text x="${X(ms)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">${esc(tickLabel(ms, speedRange))}</text>`).join("")}
+    ${tests.filter(t => t.error).map(t => `<line x1="${X(t.ms)}" x2="${X(t.ms)}" y1="${H - m.b}" y2="${H - m.b - 10}" stroke="var(--danger)" stroke-width="2" stroke-linecap="round"/>`).join("")}
+    <path d="${line("down_mbps")}" fill="none" stroke="var(--down)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="${line("up_mbps")}" fill="none" stroke="var(--up)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${marks("down_mbps")}${marks("up_mbps")}
+    ${last ? `<text x="${X(last.ms) + 10}" y="${yd + 4}" font-size="12" fill="var(--text)">↓ ${mbps(last.down_mbps)}</text>
+      <text x="${X(last.ms) + 10}" y="${yu + 4}" font-size="12" fill="var(--text)">↑ ${mbps(last.up_mbps)}</text>` : ""}
+    <g id="sdHover" visibility="hidden">
+      <line id="sdCross" y1="${m.t}" y2="${H - m.b}" stroke="var(--muted)" stroke-dasharray="3 3"/>
+      <circle id="sdHd" r="5" fill="var(--down)" stroke="var(--panel)" stroke-width="2"/>
+      <circle id="sdHu" r="5" fill="var(--up)" stroke="var(--panel)" stroke-width="2"/>
+    </g>
+    <rect id="sdHit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>
+  </svg><div class="tip" id="sdTip" hidden></div>`;
+
+  // Crosshair + tooltip on the test nearest the pointer.
+  const svg = wrap.querySelector("svg"), tip = $("sdTip"), hover = $("sdHover");
+  const hide = () => { hover.setAttribute("visibility", "hidden"); tip.hidden = true; };
+  $("sdHit").addEventListener("pointerleave", hide);
+  $("sdHit").addEventListener("pointermove", e => {
+    if (!tests.length) return;
+    const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width;
+    const ms = t0 + (x - m.l) / (W - m.l - m.r) * (t1 - t0);
+    const t = tests.reduce((a, b) => Math.abs(b.ms - ms) < Math.abs(a.ms - ms) ? b : a);
+    const cx = X(t.ms);
+    $("sdCross").setAttribute("x1", cx); $("sdCross").setAttribute("x2", cx);
+    $("sdHd").setAttribute("visibility", t.error ? "hidden" : "visible");
+    $("sdHu").setAttribute("visibility", t.error ? "hidden" : "visible");
+    if (!t.error) {
+      $("sdHd").setAttribute("cx", cx); $("sdHd").setAttribute("cy", Y(t.down_mbps));
+      $("sdHu").setAttribute("cx", cx); $("sdHu").setAttribute("cy", Y(t.up_mbps));
+    }
+    hover.setAttribute("visibility", "visible");
+    tip.innerHTML = `<div class="sub">${esc(when2(t.ms))}</div>` + (t.error
+      ? `<div><span style="color:var(--danger)">●</span> Test failed: ${esc(t.error)}</div>`
+      : `<div><span class="key" style="background:var(--down)"></span>Download <b>${mbps(t.down_mbps)} Mbps</b></div>
+         <div><span class="key" style="background:var(--up)"></span>Upload <b>${mbps(t.up_mbps)} Mbps</b></div>`);
+    tip.hidden = false;
+    const px = cx * r.width / W, flip = px > r.width - tip.offsetWidth - 24;
+    tip.style.left = `${flip ? px - tip.offsetWidth - 12 : px + 12}px`;
+    tip.style.top = `${m.t * r.height / H}px`;
+  });
+}
+
+document.querySelectorAll("#speedDialog .seg button").forEach(b => b.onclick = () => {
+  speedRange = Number(b.dataset.days);
+  try { localStorage.setItem("netmon.speedRange", String(speedRange)); } catch {}
+  loadSpeedHistory();
+});
+$("sdClose").onclick = () => $("speedDialog").close();
+$("sdTest").onclick = startSpeedTest;
+addEventListener("resize", () => { if ($("speedDialog").open) drawSpeedChart(); });
 
 function renderConnection() {
   const w = data.wan || {}, down = w.state === "down", unknown = w.state == null;
@@ -648,8 +867,16 @@ $("settingsBtn").onclick = async () => {
   const s = await (await api("/api/settings")).json();
   for (const el of form.elements) if (el.name) el.type === "checkbox" ? (el.checked = s[el.name]) : (el.value = s[el.name]);
   $("testResult").textContent = "";
+  showSpeedUsage();
   $("settings").showModal();
 };
+// Worst-case daily data for the chosen schedule (220 MB is the most one test can move).
+function showSpeedUsage() {
+  const hours = Number(form.elements.speedtest_hours.value);
+  const gb = hours ? (24 / hours) * 0.22 : 0;
+  $("speedUsage").textContent = hours ? `At this schedule: up to about ${gb < 1 ? gb.toFixed(1) : Math.round(gb)} GB a day.${gb >= 5 ? " Check your plan has no data cap." : ""}` : "";
+}
+form.elements.speedtest_hours.addEventListener("change", showSpeedUsage);
 $("settings").addEventListener("close", async () => {
   if ($("settings").returnValue === "save") await api("/api/settings", { method: "POST", body: JSON.stringify(formSettings()) });
 });

@@ -331,6 +331,13 @@ class DeviceStore:
             row = self._conn.execute("SELECT ts, down_mbps, up_mbps, error FROM speedtests ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
 
+    def speedtests(self, days: float) -> list[dict]:
+        """Every speed test in the last `days`, oldest first (failed ones included, with their error)."""
+        with self._lock:
+            rows = self._conn.execute("SELECT ts, down_mbps, up_mbps, error FROM speedtests WHERE ts >= ? ORDER BY ts",
+                                      (_ago(days=days),)).fetchall()
+        return [dict(r) for r in rows]
+
     def summary(self) -> dict:
         """Cheap status for the tray icon: device counts and internet state."""
         with self._lock:

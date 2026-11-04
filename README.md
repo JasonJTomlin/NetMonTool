@@ -7,7 +7,8 @@ out what each device is, tracks whether it's online, and alerts you when somethi
   reports one, its name and model.
 - **Tracks status:** online/offline, latency, 24-hour and 7-day uptime, and a log of changes.
 - **Watches your connection:** checks the router and the internet on every scan, and tests
-  download/upload speed every few hours (or on demand).
+  download/upload speed on a schedule you choose (every 15 minutes to once a day) or on
+  demand. Click the *Internet speed* box for a chart and history of your speeds over time.
 - **Alerts** when a new device joins, a device you're watching goes offline, or the internet
   drops. Alerts arrive as Windows desktop notifications and/or in Discord, Slack or Teams.
 
