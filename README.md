@@ -47,5 +47,15 @@ Then open http://127.0.0.1:5000.
   same subnet as this machine (not across routers).
 - **Devices are tracked by MAC address**, so a device keeps its name and history when DHCP
   gives it a new IP. Nothing is flagged NEW on the very first scan.
+- **History:** every scan records who was online and their latency, kept for 30 days. The
+  dashboard shows 24-hour uptime per device, and a device's details show 7-day uptime, a
+  latency chart and its recent status changes. A *Recent activity* feed lists changes across
+  the network.
+- **Internet status:** each scan also pings your router and 1.1.1.1 / 8.8.8.8, so you can tell
+  a router problem from an internet outage.
+- **Alerts** (configure with the *Alerts…* button): a new device joins, a device you're watching
+  (bell icon) goes offline for 2 scans in a row or comes back, or the internet drops for 2 checks
+  in a row. They're delivered as Windows desktop notifications and/or to a Discord, Slack or
+  Teams webhook.
 - **On the dashboard** click a device to see everything found about it. You can also rename devices, mark new ones as seen, filter by status, or
   forget a device.

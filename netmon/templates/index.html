@@ -21,12 +21,22 @@
   main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
   header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
   h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 28px 0 10px; }
   .sub { color: var(--muted); font-size: 13px; }
   button { font: inherit; border: 1px solid var(--border); background: var(--panel); color: var(--text);
            padding: 7px 14px; border-radius: 8px; cursor: pointer; }
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button:disabled { opacity: .6; cursor: default; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+
+  .conn { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .conn .panel { padding: 12px 16px; display: flex; align-items: center; gap: 14px; }
+  .conn .what { font-weight: 600; }
+  .conn .stats { color: var(--muted); font-size: 13px; }
+  .conn svg { margin-left: auto; flex-shrink: 0; }
+  .conn .down .what { color: var(--danger); }
+
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
           cursor: pointer; text-align: left; }
@@ -34,40 +44,68 @@
   .card .n { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .card .l { color: var(--muted); font-size: 13px; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-  input[type=search] { flex: 1; min-width: 180px; font: inherit; padding: 7px 10px; border-radius: 8px;
+  input[type=search], input[type=url] { flex: 1; min-width: 180px; font: inherit; padding: 7px 10px; border-radius: 8px;
                        border: 1px solid var(--border); background: var(--panel); color: var(--text); }
-  .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+
+  .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 10px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
   tr:last-child td { border-bottom: 0; }
   tr.off td { color: var(--muted); }
   .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+  .num { font-variant-numeric: tabular-nums; }
   .status { display: inline-flex; align-items: center; gap: 6px; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--offline); }
-  .on .dot { background: var(--online); box-shadow: 0 0 0 3px color-mix(in srgb, var(--online) 25%, transparent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--offline); flex-shrink: 0; }
+  .on .dot, .dot.on { background: var(--online); box-shadow: 0 0 0 3px color-mix(in srgb, var(--online) 25%, transparent); }
+  .dot.down { background: var(--danger); }
   .badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 6px; }
   .badge.new { background: color-mix(in srgb, var(--new) 18%, transparent); color: var(--new); }
   .badge.me { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-  .name input { font: inherit; color: var(--text); background: transparent; border: 1px solid transparent;
-                border-radius: 6px; padding: 3px 6px; margin-left: -7px; width: 100%; min-width: 150px;
-                text-overflow: ellipsis; }
-  .name { white-space: normal; min-width: 200px; }
-  .name .host { white-space: normal; }
-  .name input:hover, .name input:focus { border-color: var(--border); background: var(--bg); outline: none; }
-  .host { color: var(--muted); font-size: 12px; }
   .badge.priv { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+  .name { white-space: normal; min-width: 200px; }
+  .name input { font: inherit; color: var(--text); background: transparent; border: 1px solid transparent;
+                border-radius: 6px; padding: 3px 6px; margin-left: -7px; width: 100%; min-width: 150px; text-overflow: ellipsis; }
+  .name input:hover, .name input:focus { border-color: var(--border); background: var(--bg); outline: none; }
+  .host { color: var(--muted); font-size: 12px; white-space: normal; }
   tr.dev { cursor: pointer; }
   tr.dev:hover td { background: color-mix(in srgb, var(--accent) 4%, transparent); }
   .chev { display: inline-block; width: 12px; color: var(--muted); transition: transform .15s; }
   tr.open .chev { transform: rotate(90deg); }
   tr.details td { background: var(--bg); white-space: normal; padding: 14px 16px 16px 32px; }
+  .details-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 24px; }
+  @media (max-width: 760px) { .details-grid { grid-template-columns: 1fr; } }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
   dt { color: var(--muted); font-size: 13px; }
   dd { margin: 0; word-break: break-word; }
-  .actions button { padding: 3px 9px; font-size: 12px; }
+  .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; }
+  .uptime { display: flex; gap: 24px; margin-bottom: 14px; }
+  .uptime b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .actions { text-align: right; }
+  .actions button { padding: 3px 9px; font-size: 12px; margin-left: 4px; }
   .actions button.forget:hover { border-color: var(--danger); color: var(--danger); }
+  button.bell { padding: 3px 7px; line-height: 0; color: var(--muted); }
+  button.bell[aria-pressed=true] { color: var(--new); border-color: color-mix(in srgb, var(--new) 50%, transparent);
+                                   background: color-mix(in srgb, var(--new) 12%, transparent); }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
+
+  .events { list-style: none; margin: 0; padding: 0; }
+  .events li { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+  .events li:last-child { border-bottom: 0; }
+  .events .when { color: var(--muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
+  .compact li { padding: 4px 0; border: 0; }
+
+  dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text);
+           padding: 20px 22px; width: min(460px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgb(0 0 0 / .4); }
+  dialog h3 { margin: 0 0 14px; font-size: 16px; }
+  dialog label.check { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+  dialog label.check span small { display: block; color: var(--muted); font-size: 12px; }
+  dialog .field { margin: 16px 0 6px; }
+  dialog .field input { width: 100%; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  dialog .row .left { margin-right: auto; }
+  #testResult { color: var(--muted); font-size: 13px; align-self: center; }
 </style>
 </head>
 <body>
@@ -77,37 +115,69 @@
       <h1>Network Monitor</h1>
       <div class="sub" id="meta">Loading…</div>
     </div>
-    <div style="display:flex; gap:8px">
+    <div style="display:flex; gap:8px; flex-wrap:wrap">
+      <button id="settingsBtn">Alerts…</button>
       <button id="ackAll">Mark all seen</button>
       <button class="primary" id="scanBtn">Scan now</button>
     </div>
   </header>
+
+  <div class="conn">
+    <div class="panel" id="internet"></div>
+    <div class="panel" id="router"></div>
+  </div>
 
   <div class="cards">
     <button class="card active" data-filter="all"><div class="n" id="cAll">–</div><div class="l">Known devices</div></button>
     <button class="card" data-filter="online"><div class="n" id="cOn">–</div><div class="l">Online</div></button>
     <button class="card" data-filter="offline"><div class="n" id="cOff">–</div><div class="l">Offline</div></button>
     <button class="card" data-filter="new"><div class="n" id="cNew">–</div><div class="l">New devices</div></button>
+    <button class="card" data-filter="watched"><div class="n" id="cWatch">–</div><div class="l">Watched</div></button>
   </div>
 
   <div class="toolbar">
     <input type="search" id="q" placeholder="Filter by name, maker, model, IP or MAC">
   </div>
 
-  <div class="table-wrap">
+  <div class="panel table-wrap">
     <table>
-      <thead><tr><th>Status</th><th>Name</th><th>IP address</th><th>MAC address</th><th>Latency</th><th>Last seen</th><th></th></tr></thead>
+      <thead><tr><th>Status</th><th>Name</th><th>IP address</th><th>MAC address</th><th>Latency</th><th>Uptime 24h</th><th>Last seen</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <div class="empty" id="empty" hidden>No devices match.</div>
   </div>
+
+  <h2>Recent activity</h2>
+  <div class="panel"><ul class="events" id="activity"></ul></div>
 </main>
 
+<dialog id="settings">
+  <form method="dialog" id="settingsForm">
+    <h3>Alerts</h3>
+    <label class="check"><input type="checkbox" name="notify_new"><span>New devices<small>When a device joins that hasn't been seen before.</small></span></label>
+    <label class="check"><input type="checkbox" name="notify_offline"><span>Watched devices go offline<small>Turn on per device with the bell. Fires after 2 missed scans in a row, and again when it's back.</small></span></label>
+    <label class="check"><input type="checkbox" name="notify_internet"><span>Internet connection drops<small>When 1.1.1.1 and 8.8.8.8 stop answering, and when they're back.</small></span></label>
+    <div class="label" style="margin-top:18px">Send alerts to</div>
+    <label class="check"><input type="checkbox" name="notify_desktop"><span>Desktop notifications</span></label>
+    <div class="field">
+      <div class="sub" style="margin-bottom:4px">Webhook URL (Discord, Slack or Teams), optional</div>
+      <input type="url" name="webhook_url" placeholder="https://discord.com/api/webhooks/…">
+    </div>
+    <div class="row">
+      <button type="button" class="left" id="testBtn">Send test alert</button>
+      <span id="testResult"></span>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button class="primary" id="saveSettings" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
-let data = { devices: [] }, filter = "all", pollTimer;
-const expanded = new Set();
+let data = { devices: [], wan: {} }, events = [], filter = "all", pollTimer;
+const expanded = new Set(), histories = {};
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = id => document.getElementById(id);
 
 function ago(iso) {
   if (!iso) return "never";
@@ -117,12 +187,46 @@ function ago(iso) {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return new Date(iso).toLocaleDateString();
 }
-
+const when = iso => {
+  const d = new Date(iso), today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+const ms = v => v == null ? "—" : v < 1 ? "<1 ms" : `${Math.round(v)} ms`;
+const pct = v => v == null ? "—" : `${(v * 100).toFixed(v >= 0.999 || v === 0 ? 0 : 1)}%`;
 const fallbackName = x => x.discovered_name || (x.vendor ? `${x.vendor} device` : x.private_mac ? "Device with private MAC" : "Unnamed device");
-const latency = x => x.latency_ms == null ? "—" : x.latency_ms < 1 ? "<1 ms" : `${Math.round(x.latency_ms)} ms`;
+
+const BELL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+
+// Latency over the last 24h. Gaps (offline or no ping reply) break the line.
+function spark(points, w = 220, h = 36) {
+  if (!points?.length) return "";
+  const end = Date.now(), start = end - 864e5;
+  const vals = points.map(p => p.latency_ms).filter(v => v != null);
+  const max = Math.max(5, ...vals);
+  let d = "", pen = false;
+  for (const p of points) {
+    if (p.latency_ms == null) { pen = false; continue; }
+    const x = ((new Date(p.ts) - start) / (end - start)) * w, y = h - 2 - (p.latency_ms / max) * (h - 4);
+    d += `${pen ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+    pen = true;
+  }
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Latency over the last 24 hours, peak ${Math.round(max)} ms">
+    <line x1="0" y1="${h - 1}" x2="${w}" y2="${h - 1}" stroke="var(--border)"/>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+}
+
+const EVENT_TEXT = {
+  new: ["New device joined", "new"], online: ["Came online", "on"], offline: ["Went offline", ""],
+  internet_down: ["Internet connection lost", "down"], internet_up: ["Internet connection restored", "on"],
+};
+function eventItem(e, withName = true) {
+  const [text, cls] = EVENT_TEXT[e.kind] || [e.kind, ""];
+  const who = withName && e.name ? `<b>${esc(e.name)}</b> · ` : "";
+  return `<li><span class="dot ${cls}"></span><span>${who}${text}${e.ip && withName ? ` <span class="sub mono">${esc(e.ip)}</span>` : ""}</span><span class="when">${when(e.ts)}</span></li>`;
+}
 
 function details(x) {
-  const rows = [
+  const info = [
     ["Device type", x.device_type],
     ["Manufacturer", x.vendor || (x.private_mac ? "Unknown: this device uses a private (randomized) MAC address, common on phones" : null)],
     ["Model", x.model],
@@ -133,46 +237,75 @@ function details(x) {
     ["Operating system", x.os_hint && (x.is_self ? x.os_hint : `${x.os_hint} (guessed from ping TTL ${x.ttl})`)],
     ["Advertised services", x.services],
     ["First seen", x.first_seen && new Date(x.first_seen).toLocaleString()],
-    ["Last seen", x.last_seen && new Date(x.last_seen).toLocaleString()],
   ].filter(([, v]) => v);
-  return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
+  const h = histories[x.id];
+  const hist = !h ? '<div class="sub">Loading history…</div>' : `
+    <div class="uptime">
+      <div><div class="label">Uptime 24h</div><b>${pct(h.uptime_24h)}</b></div>
+      <div><div class="label">Uptime 7d</div><b>${pct(h.uptime_7d)}</b></div>
+    </div>
+    ${h.latency.some(p => p.latency_ms != null) ? `<div class="label">Latency, last 24h</div>${spark(h.latency, 260, 40)}` : ""}
+    <div class="label" style="margin-top:12px">Status changes</div>
+    <ul class="events compact">${h.events.map(e => eventItem(e, false)).join("") || '<li class="sub">None yet</li>'}</ul>`;
+  return `<div class="details-grid"><dl>${info.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl><div>${hist}</div></div>`;
 }
 
 const api = (path, opts = {}) => fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
 
+async function loadHistory(id) {
+  try { histories[id] = await (await api(`/api/devices/${id}/history`)).json(); render(); } catch {}
+}
+
 async function load() {
   clearTimeout(pollTimer);
   try {
-    data = await (await api("/api/devices")).json();
+    [data, { events }] = await Promise.all([api("/api/devices").then(r => r.json()), api("/api/events").then(r => r.json())]);
     render();
+    expanded.forEach(loadHistory);
   } catch (e) {
-    document.getElementById("meta").textContent = "Can't reach the netmon server.";
+    $("meta").textContent = "Can't reach the netmon server.";
   }
   pollTimer = setTimeout(load, data.scanning ? 2000 : 10000);
 }
 
+function renderConnection() {
+  const w = data.wan || {}, down = w.state === "down", unknown = w.state == null;
+  $("internet").className = `panel ${down ? "down" : ""}`;
+  $("internet").innerHTML = `
+    <span class="dot ${unknown ? "" : down ? "down" : "on"}"></span>
+    <div><div class="what">Internet ${unknown ? "checking…" : down ? "down" : "online"}</div>
+    <div class="stats">${down ? "No reply from 1.1.1.1 or 8.8.8.8" : ms(w.internet_ms)} · ${pct(w.uptime_24h)} up today</div></div>
+    ${spark(w.latency, 140, 32)}`;
+  const routerUp = w.gateway_ms != null;
+  $("router").innerHTML = `
+    <span class="dot ${w.gateway ? (routerUp ? "on" : "down") : ""}"></span>
+    <div><div class="what">Router ${w.gateway ? `<span class="sub mono">${esc(w.gateway)}</span>` : ""}</div>
+    <div class="stats">${!w.gateway ? "checking…" : routerUp ? ms(w.gateway_ms) : "not answering"}</div></div>`;
+}
+
 function render() {
   const d = data.devices;
-  document.getElementById("cAll").textContent = d.length;
-  document.getElementById("cOn").textContent = d.filter(x => x.online).length;
-  document.getElementById("cOff").textContent = d.filter(x => !x.online).length;
-  document.getElementById("cNew").textContent = d.filter(x => x.is_new).length;
+  $("cAll").textContent = d.length;
+  $("cOn").textContent = d.filter(x => x.online).length;
+  $("cOff").textContent = d.filter(x => !x.online).length;
+  $("cNew").textContent = d.filter(x => x.is_new).length;
+  $("cWatch").textContent = d.filter(x => x.watch).length;
 
-  document.getElementById("meta").textContent =
-    `${data.subnet} · ${data.scanning ? "Scanning…" : "Last scan " + ago(data.last_scan)} · rescans every ${data.interval}s`;
-  const btn = document.getElementById("scanBtn");
-  btn.disabled = data.scanning;
-  btn.textContent = data.scanning ? "Scanning…" : "Scan now";
+  $("meta").textContent = `${data.subnet} · ${data.scanning ? "Scanning…" : "Last scan " + ago(data.last_scan)} · rescans every ${data.interval}s`;
+  $("scanBtn").disabled = data.scanning;
+  $("scanBtn").textContent = data.scanning ? "Scanning…" : "Scan now";
+  renderConnection();
+  $("activity").innerHTML = events.map(e => eventItem(e)).join("") || '<li class="sub">Nothing yet. Status changes appear here.</li>';
 
-  const q = document.getElementById("q").value.trim().toLowerCase();
-  const shown = d.filter(x =>
-    (filter === "all" || (filter === "online" && x.online) || (filter === "offline" && !x.online) || (filter === "new" && x.is_new)) &&
+  const q = $("q").value.trim().toLowerCase();
+  const match = { all: () => true, online: x => x.online, offline: x => !x.online, new: x => x.is_new, watched: x => x.watch };
+  const shown = d.filter(x => match[filter](x) &&
     (!q || [x.label, x.discovered_name, x.vendor, x.model, x.device_type, x.ip, x.mac].some(v => (v || "").toLowerCase().includes(q))));
 
   // Don't redraw under the user while they're editing a name.
   if (document.activeElement?.matches(".name input")) return;
 
-  document.getElementById("rows").innerHTML = shown.map(x => {
+  $("rows").innerHTML = shown.map(x => {
     const open = expanded.has(x.id);
     // Second line: whatever the user's label is hiding, plus what kind of device this is.
     const sub = [x.label && x.discovered_name, x.device_type || x.model || (x.discovered_name ? x.vendor : null)].filter(Boolean).join(" · ");
@@ -187,26 +320,28 @@ function render() {
       </td>
       <td class="mono">${esc(x.ip)}</td>
       <td class="mono">${esc(x.mac || "—")}</td>
-      <td>${x.online ? latency(x) : "—"}</td>
+      <td class="num">${x.online ? ms(x.latency_ms) : "—"}</td>
+      <td class="num">${pct(x.uptime_24h)}</td>
       <td title="${esc(x.last_seen)}">${x.online ? "now" : ago(x.last_seen)}</td>
       <td class="actions">
         ${x.is_new ? `<button data-ack="${x.id}">Seen</button>` : ""}
+        <button class="bell" data-watch="${x.id}" aria-pressed="${x.watch}" title="${x.watch ? "Alerting when this goes offline. Click to stop." : "Alert me when this goes offline"}">${BELL}</button>
         <button class="forget" data-forget="${x.id}" title="Remove from the list">Forget</button>
       </td>
     </tr>
-    ${open ? `<tr class="details"><td colspan="7">${details(x)}</td></tr>` : ""}`;
+    ${open ? `<tr class="details"><td colspan="8">${details(x)}</td></tr>` : ""}`;
   }).join("");
-  document.getElementById("empty").hidden = shown.length > 0;
+  $("empty").hidden = shown.length > 0;
 }
 
-document.getElementById("scanBtn").onclick = async () => {
+$("scanBtn").onclick = async () => {
   await api("/api/scan", { method: "POST" });
   data.scanning = true;
   render();
   setTimeout(load, 500);
 };
-document.getElementById("ackAll").onclick = async () => { await api("/api/devices/ack", { method: "POST" }); load(); };
-document.getElementById("q").oninput = render;
+$("ackAll").onclick = async () => { await api("/api/devices/ack", { method: "POST" }); load(); };
+$("q").oninput = render;
 
 document.querySelectorAll(".card").forEach(c => c.onclick = () => {
   document.querySelectorAll(".card").forEach(x => x.classList.toggle("active", x === c));
@@ -214,27 +349,58 @@ document.querySelectorAll(".card").forEach(c => c.onclick = () => {
   render();
 });
 
-const rows = document.getElementById("rows");
-rows.addEventListener("click", async e => {
-  const ack = e.target.dataset.ack, forget = e.target.dataset.forget;
-  if (ack) { await api(`/api/devices/${ack}/ack`, { method: "POST" }); load(); }
-  if (forget && confirm("Forget this device? It will reappear as new if it's seen again.")) {
-    await api(`/api/devices/${forget}`, { method: "DELETE" }); load();
+$("rows").addEventListener("click", async e => {
+  const btn = e.target.closest("button");
+  if (btn?.dataset.ack) { await api(`/api/devices/${btn.dataset.ack}/ack`, { method: "POST" }); return load(); }
+  if (btn?.dataset.watch) {
+    const on = btn.getAttribute("aria-pressed") !== "true";
+    await api(`/api/devices/${btn.dataset.watch}/watch`, { method: "POST", body: JSON.stringify({ watch: on }) });
+    return load();
+  }
+  if (btn?.dataset.forget) {
+    if (confirm("Forget this device and its history? It will reappear as new if it's seen again.")) {
+      await api(`/api/devices/${btn.dataset.forget}`, { method: "DELETE" });
+      load();
+    }
+    return;
   }
   const row = e.target.closest("tr.dev");
-  if (row && !ack && !forget && !e.target.matches("input")) {
+  if (row && !btn && !e.target.matches("input")) {
     const id = Number(row.dataset.row);
-    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    if (expanded.has(id)) expanded.delete(id); else { expanded.add(id); loadHistory(id); }
     render();
   }
 });
-rows.addEventListener("change", async e => {
+$("rows").addEventListener("change", async e => {
   if (!e.target.matches(".name input")) return;
   await api(`/api/devices/${e.target.dataset.id}/label`, { method: "POST", body: JSON.stringify({ label: e.target.value }) });
   e.target.blur();
   load();
 });
-rows.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".name input")) e.target.blur(); });
+$("rows").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".name input")) e.target.blur(); });
+
+// ---- alert settings
+const form = $("settingsForm");
+function formSettings() {
+  const s = {};
+  for (const el of form.elements) if (el.name) s[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  return s;
+}
+$("settingsBtn").onclick = async () => {
+  const s = await (await api("/api/settings")).json();
+  for (const el of form.elements) if (el.name) el.type === "checkbox" ? (el.checked = s[el.name]) : (el.value = s[el.name]);
+  $("testResult").textContent = "";
+  $("settings").showModal();
+};
+$("settings").addEventListener("close", async () => {
+  if ($("settings").returnValue === "save") await api("/api/settings", { method: "POST", body: JSON.stringify(formSettings()) });
+});
+$("testBtn").onclick = async () => {
+  $("testResult").textContent = "Sending…";
+  await api("/api/settings", { method: "POST", body: JSON.stringify(formSettings()) });
+  await api("/api/notify/test", { method: "POST" });
+  $("testResult").textContent = "Sent";
+};
 
 load();
 </script>

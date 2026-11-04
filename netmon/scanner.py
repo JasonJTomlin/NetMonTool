@@ -82,6 +82,33 @@ def ping(ip: str, timeout_ms: int = 700) -> PingReply | None:
     return PingReply(int(ttl.group(1)), latency)
 
 
+INTERNET_TARGETS = ["1.1.1.1", "8.8.8.8"]
+
+
+def default_gateway() -> str | None:
+    """Return the IPv4 default gateway (normally your router)."""
+    cmd = ["route", "print", "-4", "0.0.0.0"] if IS_WINDOWS else ["ip", "-4", "route", "show", "default"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for line in out.splitlines():
+        parts = line.split()
+        if IS_WINDOWS and len(parts) >= 3 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
+            return parts[2]
+        if not IS_WINDOWS and "via" in parts:
+            return parts[parts.index("via") + 1]
+    return None
+
+
+def internet_latency() -> float | None:
+    """Ping well-known public resolvers; return the first reply's latency, or None if all fail."""
+    for target in INTERNET_TARGETS:
+        if (reply := ping(target, timeout_ms=1500)) is not None:
+            return reply.latency_ms
+    return None
+
+
 def os_hint(ttl: int | None) -> str | None:
     """Guess the OS family from a reply's TTL; each OS starts from a different default."""
     if ttl is None:
