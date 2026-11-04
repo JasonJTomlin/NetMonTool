@@ -254,7 +254,10 @@ external libraries)
 - **Count cards:** Known, Online, Offline, New and Watched. Each card is also a filter.
 - **Device table:** status, editable name with badges (This PC, NEW, Private MAC), IP, MAC,
   latency, 24h uptime, last seen, and buttons for seen, watch and forget. A text box filters by
-  name, maker, model, IP or MAC.
+  name, maker, model, IP or MAC. Clicking a column header sorts by it, and clicking again
+  reverses the order. The default sort is IP; uptime and last seen start high-to-low. Blank
+  values always sort last, ties fall back to IP order so rows don't jump between refreshes, and
+  the choice is remembered in the browser's `localStorage`.
 - **Details row** (click a device): everything identified about it, 24h/7d uptime, a latency
   chart (gaps where the device was offline) and its recent status changes.
 - **Recent activity:** network-wide feed of joins, departures, returns and internet outages.

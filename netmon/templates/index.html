@@ -51,6 +51,10 @@
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 10px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  th button.sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  th button.sort:hover, th[aria-sort=ascending] button.sort, th[aria-sort=descending] button.sort { color: var(--text); }
+  th button.sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  th .arrow { font-size: 9px; min-width: 9px; }
   tr:last-child td { border-bottom: 0; }
   tr.off td { color: var(--muted); }
   .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
@@ -141,7 +145,16 @@
 
   <div class="panel table-wrap">
     <table>
-      <thead><tr><th>Status</th><th>Name</th><th>IP address</th><th>MAC address</th><th>Latency</th><th>Uptime 24h</th><th>Last seen</th><th></th></tr></thead>
+      <thead><tr>
+        <th aria-sort="none"><button class="sort" data-sort="status">Status<span class="arrow"></span></button></th>
+        <th aria-sort="none"><button class="sort" data-sort="name">Name<span class="arrow"></span></button></th>
+        <th aria-sort="none"><button class="sort" data-sort="ip">IP address<span class="arrow"></span></button></th>
+        <th aria-sort="none"><button class="sort" data-sort="mac">MAC address<span class="arrow"></span></button></th>
+        <th aria-sort="none"><button class="sort" data-sort="latency">Latency<span class="arrow"></span></button></th>
+        <th aria-sort="none"><button class="sort" data-sort="uptime">Uptime 24h<span class="arrow"></span></button></th>
+        <th aria-sort="none"><button class="sort" data-sort="seen">Last seen<span class="arrow"></span></button></th>
+        <th></th>
+      </tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <div class="empty" id="empty" hidden>No devices match.</div>
@@ -268,6 +281,49 @@ async function load() {
   pollTimer = setTimeout(load, data.scanning ? 2000 : 10000);
 }
 
+// ---- column sorting. `desc` columns start high-to-low on first click; blanks always sort last.
+const ipNum = x => x.ip.split(".").reduce((n, p) => n * 256 + Number(p), 0);
+const SORTS = {
+  status: { get: x => x.online ? 0 : 1 },
+  name: { get: x => x.label || fallbackName(x) },
+  ip: { get: ipNum },
+  mac: { get: x => x.mac },
+  latency: { get: x => x.online ? x.latency_ms : null },
+  uptime: { get: x => x.uptime_24h, desc: true },
+  seen: { get: x => x.online ? Infinity : Date.parse(x.last_seen), desc: true },
+};
+let sort = { key: "ip", dir: 1 };
+try {
+  const saved = JSON.parse(localStorage.getItem("netmon.sort"));
+  if (saved && SORTS[saved.key] && Math.abs(saved.dir) === 1) sort = saved;
+} catch {}
+
+function compare(a, b) {
+  const va = SORTS[sort.key].get(a), vb = SORTS[sort.key].get(b);
+  if ((va == null) !== (vb == null)) return va == null ? 1 : -1;
+  if (va != null && va !== vb) {
+    const order = typeof va === "string" ? va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" }) : va < vb ? -1 : 1;
+    if (order) return order * sort.dir;
+  }
+  return ipNum(a) - ipNum(b);  // stable tie-break so rows don't jump between polls
+}
+
+function renderSortHeaders() {
+  document.querySelectorAll("button.sort").forEach(b => {
+    const on = b.dataset.sort === sort.key;
+    b.parentElement.setAttribute("aria-sort", on ? (sort.dir === 1 ? "ascending" : "descending") : "none");
+    b.querySelector(".arrow").textContent = on ? (sort.dir === 1 ? "▲" : "▼") : "";
+  });
+}
+
+document.querySelector("thead").addEventListener("click", e => {
+  const key = e.target.closest("button.sort")?.dataset.sort;
+  if (!key) return;
+  sort = sort.key === key ? { key, dir: -sort.dir } : { key, dir: SORTS[key].desc ? -1 : 1 };
+  try { localStorage.setItem("netmon.sort", JSON.stringify(sort)); } catch {}
+  render();
+});
+
 function renderConnection() {
   const w = data.wan || {}, down = w.state === "down", unknown = w.state == null;
   $("internet").className = `panel ${down ? "down" : ""}`;
@@ -301,6 +357,8 @@ function render() {
   const match = { all: () => true, online: x => x.online, offline: x => !x.online, new: x => x.is_new, watched: x => x.watch };
   const shown = d.filter(x => match[filter](x) &&
     (!q || [x.label, x.discovered_name, x.vendor, x.model, x.device_type, x.ip, x.mac].some(v => (v || "").toLowerCase().includes(q))));
+  shown.sort(compare);
+  renderSortHeaders();
 
   // Don't redraw under the user while they're editing a name.
   if (document.activeElement?.matches(".name input")) return;
