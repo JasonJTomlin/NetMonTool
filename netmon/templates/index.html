@@ -152,6 +152,7 @@
         <th aria-sort="none"><button class="sort" data-sort="mac">MAC address<span class="arrow"></span></button></th>
         <th aria-sort="none"><button class="sort" data-sort="latency">Latency<span class="arrow"></span></button></th>
         <th aria-sort="none"><button class="sort" data-sort="uptime">Uptime 24h<span class="arrow"></span></button></th>
+        <th aria-sort="none"><button class="sort" data-sort="onlinefor" title="How long the device has been online without a break">Online for<span class="arrow"></span></button></th>
         <th aria-sort="none"><button class="sort" data-sort="seen">Last seen<span class="arrow"></span></button></th>
         <th></th>
       </tr></thead>
@@ -206,6 +207,14 @@ const when = iso => {
 };
 const ms = v => v == null ? "—" : v < 1 ? "<1 ms" : `${Math.round(v)} ms`;
 const pct = v => v == null ? "—" : `${(v * 100).toFixed(v >= 0.999 || v === 0 ? 0 : 1)}%`;
+// "3d 4h", "2h 15m", "12m", "<1m"
+function duration(ms) {
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (d) return `${d}d ${h % 24}h`;
+  if (h) return `${h}h ${m % 60}m`;
+  return m ? `${m}m` : "<1m";
+}
+const onlineFor = x => x.online && x.online_since ? Date.now() - Date.parse(x.online_since) : null;
 const fallbackName = x => x.discovered_name || (x.vendor ? `${x.vendor} device` : x.private_mac ? "Device with private MAC" : "Unnamed device");
 
 const BELL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
@@ -249,6 +258,7 @@ function details(x) {
     ["DNS name", x.hostname],
     ["Operating system", x.os_hint && (x.is_self ? x.os_hint : `${x.os_hint} (guessed from ping TTL ${x.ttl})`)],
     ["Advertised services", x.services],
+    ["Online since", x.online && x.online_since && new Date(x.online_since).toLocaleString()],
     ["First seen", x.first_seen && new Date(x.first_seen).toLocaleString()],
   ].filter(([, v]) => v);
   const h = histories[x.id];
@@ -290,6 +300,7 @@ const SORTS = {
   mac: { get: x => x.mac },
   latency: { get: x => x.online ? x.latency_ms : null },
   uptime: { get: x => x.uptime_24h, desc: true },
+  onlinefor: { get: onlineFor, desc: true },
   seen: { get: x => x.online ? Infinity : Date.parse(x.last_seen), desc: true },
 };
 let sort = { key: "ip", dir: 1 };
@@ -380,6 +391,7 @@ function render() {
       <td class="mono">${esc(x.mac || "—")}</td>
       <td class="num">${x.online ? ms(x.latency_ms) : "—"}</td>
       <td class="num">${pct(x.uptime_24h)}</td>
+      <td class="num" title="${x.online && x.online_since ? "Online since " + esc(new Date(x.online_since).toLocaleString()) : ""}">${onlineFor(x) == null ? "—" : duration(onlineFor(x))}</td>
       <td title="${esc(x.last_seen)}">${x.online ? "now" : ago(x.last_seen)}</td>
       <td class="actions">
         ${x.is_new ? `<button data-ack="${x.id}">Seen</button>` : ""}
@@ -387,7 +399,7 @@ function render() {
         <button class="forget" data-forget="${x.id}" title="Remove from the list">Forget</button>
       </td>
     </tr>
-    ${open ? `<tr class="details"><td colspan="8">${details(x)}</td></tr>` : ""}`;
+    ${open ? `<tr class="details"><td colspan="9">${details(x)}</td></tr>` : ""}`;
   }).join("");
   $("empty").hidden = shown.length > 0;
 }

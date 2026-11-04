@@ -142,7 +142,7 @@ strings to the second, so they sort and compare as text.
 
 | Table | One row per | Key columns |
 | --- | --- | --- |
-| `devices` | Known device | `mac` (unique), `ip`, `label`, `online`, `is_new`, `watch`, `first_seen`, `last_seen`; identification columns (`netbios_name`, `mdns_name`, `friendly_name`, `vendor`, `model`, `device_type`, `services`); ping columns (`ttl`, `latency_ms`, `os_hint`); alert state (`missed_scans`, `alerted`) |
+| `devices` | Known device | `mac` (unique), `ip`, `label`, `online`, `is_new`, `watch`, `first_seen`, `last_seen`; identification columns (`netbios_name`, `mdns_name`, `friendly_name`, `vendor`, `model`, `device_type`, `services`); ping columns (`ttl`, `latency_ms`, `os_hint`); alert state (`missed_scans`, `alerted`); `online_since` (start of the current online stretch, NULL while offline) |
 | `scans` | Completed scan | `ts` |
 | `samples` | Device per scan it was online in | `device_id`, `ts`, `latency_ms` |
 | `events` | Status change | `device_id` (NULL for internet events), `ts`, `kind` (`new`, `online`, `offline`, `internet_down`, `internet_up`), `ip` |
@@ -159,6 +159,13 @@ learned. A device that changes IP keeps its label, history and watch flag.
   lookup dropped.
 - Ping columns are overwritten every scan, so they always show the latest reply.
 - Nothing is flagged *new* on the very first scan, since everything would be.
+
+**Online for.** `online_since` is set when a device is first seen or comes back after being
+offline, and cleared when it misses a scan. The dashboard shows now − `online_since` as an
+unbroken duration ("2h 15m"). For databases from before this column existed, it is backfilled
+from the device's last `online`/`new` event, or `first_seen` when history doesn't go back that
+far. Time when the app wasn't running is counted as online if the device was online before and
+after.
 
 **Uptime.** Uptime is the number of scans a device appeared in divided by the scans since it
 was first seen, within the window (24 hours or 7 days). This counts presence directly and needs
@@ -253,9 +260,10 @@ external libraries)
   sparkline; router address and latency.
 - **Count cards:** Known, Online, Offline, New and Watched. Each card is also a filter.
 - **Device table:** status, editable name with badges (This PC, NEW, Private MAC), IP, MAC,
-  latency, 24h uptime, last seen, and buttons for seen, watch and forget. A text box filters by
+  latency, 24h uptime, online for (time since it last came online), last seen, and buttons for
+  seen, watch and forget. A text box filters by
   name, maker, model, IP or MAC. Clicking a column header sorts by it, and clicking again
-  reverses the order. The default sort is IP; uptime and last seen start high-to-low. Blank
+  reverses the order. The default sort is IP; uptime, online for and last seen start high-to-low. Blank
   values always sort last, ties fall back to IP order so rows don't jump between refreshes, and
   the choice is remembered in the browser's `localStorage`.
 - **Details row** (click a device): everything identified about it, 24h/7d uptime, a latency

@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS wan_ts ON wan (ts);
 # misses (NetBIOS/mDNS are UDP and occasionally drop); ping stats always reflect the latest scan.
 NAME_COLUMNS = ["netbios_name", "mdns_name", "friendly_name", "vendor", "model", "device_type", "services"]
 PING_COLUMNS = ["ttl", "latency_ms", "os_hint"]
-STATE_COLUMNS = ["watch", "missed_scans", "alerted"]
+STATE_COLUMNS = ["watch", "missed_scans", "alerted", "online_since"]
 COLUMN_TYPES = {"ttl": "INTEGER", "latency_ms": "REAL", "watch": "INTEGER NOT NULL DEFAULT 0",
                 "missed_scans": "INTEGER NOT NULL DEFAULT 0", "alerted": "INTEGER NOT NULL DEFAULT 0"}
 
@@ -122,6 +122,13 @@ class DeviceStore:
             for col in NAME_COLUMNS + PING_COLUMNS + STATE_COLUMNS:
                 if col not in existing:
                     self._conn.execute(f"ALTER TABLE devices ADD COLUMN {col} {COLUMN_TYPES.get(col, 'TEXT')}")
+            # Backfill online_since for databases from before it existed: the device's last
+            # came-online event, or when it was first seen if history doesn't go back that far.
+            self._conn.execute(
+                """UPDATE devices SET online_since = COALESCE(
+                       (SELECT MAX(ts) FROM events e WHERE e.device_id = devices.id AND e.kind IN ('online', 'new')),
+                       first_seen)
+                   WHERE online = 1 AND online_since IS NULL""")
             self._conn.commit()
 
     # ------------------------------------------------------------ scans
@@ -155,10 +162,13 @@ class DeviceStore:
                 row = self._find(r)
                 if row:
                     sets = ", ".join([f"{c} = COALESCE(?, {c})" for c in NAME_COLUMNS] + [f"{c} = ?" for c in PING_COLUMNS])
+                    # SET expressions see the old row, so `online = 0` here means "was offline until now".
                     self._conn.execute(
                         f"""UPDATE devices SET ip = ?, mac = COALESCE(?, mac), hostname = COALESCE(?, hostname),
-                            is_self = ?, online = 1, last_seen = ?, missed_scans = 0, alerted = 0, {sets} WHERE id = ?""",
-                        (r.ip, r.mac, r.hostname, int(r.is_self), now, *details, row["id"]),
+                            is_self = ?, online = 1, last_seen = ?, missed_scans = 0, alerted = 0,
+                            online_since = CASE WHEN online = 0 OR online_since IS NULL THEN ? ELSE online_since END,
+                            {sets} WHERE id = ?""",
+                        (r.ip, r.mac, r.hostname, int(r.is_self), now, now, *details, row["id"]),
                     )
                     device_id = row["id"]
                     if not row["online"]:
@@ -168,9 +178,9 @@ class DeviceStore:
                 else:
                     cols = NAME_COLUMNS + PING_COLUMNS
                     cur = self._conn.execute(
-                        f"""INSERT INTO devices (mac, ip, hostname, is_self, online, is_new, first_seen, last_seen, {", ".join(cols)})
-                            VALUES (?, ?, ?, ?, 1, ?, ?, ?, {", ".join("?" * len(cols))})""",
-                        (r.mac, r.ip, r.hostname, int(r.is_self), int(not first_run), now, now, *details),
+                        f"""INSERT INTO devices (mac, ip, hostname, is_self, online, is_new, first_seen, last_seen, online_since, {", ".join(cols)})
+                            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, {", ".join("?" * len(cols))})""",
+                        (r.mac, r.ip, r.hostname, int(r.is_self), int(not first_run), now, now, now, *details),
                     )
                     device_id = cur.lastrowid
                     self._event(device_id, now, "online" if first_run else "new", r.ip)
@@ -185,7 +195,7 @@ class DeviceStore:
             for row in missing:
                 missed = row["missed_scans"] + 1
                 alert = row["watch"] and not row["alerted"] and missed >= OFFLINE_ALERT_AFTER
-                self._conn.execute("UPDATE devices SET online = 0, missed_scans = ?, alerted = alerted OR ? WHERE id = ?",
+                self._conn.execute("UPDATE devices SET online = 0, online_since = NULL, missed_scans = ?, alerted = alerted OR ? WHERE id = ?",
                                    (missed, int(alert), row["id"]))
                 if row["online"]:
                     self._event(row["id"], now, "offline", row["ip"])
