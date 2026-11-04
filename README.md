@@ -1,4 +1,4 @@
-# GHrepoTest — Network Monitor
+# NetMonTool — Network Monitor
 
 A small, locally run network monitor with a web dashboard. It scans your local subnet, works
 out what each device is, tracks whether it's online, and alerts you when something changes.
