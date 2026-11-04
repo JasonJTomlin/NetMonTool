@@ -6,7 +6,8 @@ out what each device is, tracks whether it's online, and alerts you when somethi
 - **Discovers devices** with their IP address, MAC address, manufacturer and, where the device
   reports one, its name and model.
 - **Tracks status:** online/offline, latency, 24-hour and 7-day uptime, and a log of changes.
-- **Watches your connection:** checks the router and the internet on every scan.
+- **Watches your connection:** checks the router and the internet on every scan, and tests
+  download/upload speed every few hours (or on demand).
 - **Alerts** when a new device joins, a device you're watching goes offline, or the internet
   drops. Alerts arrive as Windows desktop notifications and/or in Discord, Slack or Teams.
 
@@ -34,7 +35,7 @@ amber alerts paused), and hovering shows how many devices are online. Right-clic
 ```
 
 Either way, the dashboard is at http://127.0.0.1:5000. Click a device to see everything found
-about it, use the bell to watch it, and set up alerts with the *Alerts…* button. Only one copy
+about it, use the bell to watch it, and set up alerts and the speed-test schedule with the *Settings…* button. Only one copy
 runs at a time; starting a second tray copy just opens the dashboard.
 
 | Option | Default | |

@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS wan (
     internet_ms  REAL
 );
 CREATE INDEX IF NOT EXISTS wan_ts ON wan (ts);
+CREATE TABLE IF NOT EXISTS speedtests (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT NOT NULL,
+    down_mbps  REAL,
+    up_mbps    REAL,
+    error      TEXT
+);
 """
 
 # Details a device reports about itself. Names keep their last known value when a lookup
@@ -73,7 +80,7 @@ INTERNET_DOWN_AFTER = 2
 HISTORY_DAYS = 30
 
 DEFAULT_SETTINGS = {"notify_desktop": True, "notify_new": True, "notify_offline": True, "notify_internet": True,
-                    "webhook_url": ""}
+                    "webhook_url": "", "speedtest_hours": "3"}  # "0" turns scheduled speed tests off
 
 
 def _now() -> str:
@@ -205,7 +212,7 @@ class DeviceStore:
             self._conn.execute("INSERT OR IGNORE INTO scans (ts) VALUES (?)", (now,))
             self._conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_scan', ?)", (now,))
             cutoff = _ago(days=HISTORY_DAYS)
-            for table in ("scans", "samples", "wan", "events"):
+            for table in ("scans", "samples", "wan", "events", "speedtests"):
                 self._conn.execute(f"DELETE FROM {table} WHERE ts < ?", (cutoff,))
 
             changes.new = [self._device(i) for i in changes.new]
@@ -313,6 +320,16 @@ class DeviceStore:
             "uptime_24h": up / total if total else None,
             "latency": latency,
         }
+
+    def record_speedtest(self, down_mbps: float | None, up_mbps: float | None, error: str | None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT INTO speedtests (ts, down_mbps, up_mbps, error) VALUES (?, ?, ?, ?)",
+                               (_now(), down_mbps, up_mbps, error))
+
+    def latest_speedtest(self) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT ts, down_mbps, up_mbps, error FROM speedtests ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
 
     def summary(self) -> dict:
         """Cheap status for the tray icon: device counts and internet state."""

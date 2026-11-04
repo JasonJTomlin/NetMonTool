@@ -4,12 +4,13 @@ import ipaddress
 import logging
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from flask import Flask, abort, jsonify, render_template, request
 
-from . import scanner
+from . import scanner, speedtest
 from .notify import Notifier
 from .store import DeviceStore, ScanChanges
 from .vendors import VendorDB
@@ -78,6 +79,59 @@ class Monitor:
             self.notifier.send("Device back online", f"{d['name']} ({d['ip']}) is back online.", kind="offline")
 
 
+class SpeedTester:
+    """Runs an internet speed test every `speedtest_hours` (a setting), or at once when asked.
+
+    It has its own thread so a 10-20 s test never delays a network scan.
+    """
+
+    # Recheck at least this often, so a changed interval takes effect within a minute.
+    RECHECK_SECONDS = 60
+
+    def __init__(self, store: DeviceStore):
+        self.store = store
+        self.running = False
+        self._wake = threading.Event()
+
+    def start(self) -> None:
+        threading.Thread(target=self._run, daemon=True, name="netmon-speedtest").start()
+
+    def run_now(self) -> None:
+        self._wake.set()
+
+    def interval_hours(self) -> float:
+        try:
+            return max(0.0, float(self.store.settings()["speedtest_hours"]))
+        except ValueError:
+            return 0.0
+
+    def _seconds_until_due(self) -> float:
+        hours = self.interval_hours()
+        if not hours:
+            return self.RECHECK_SECONDS
+        last = self.store.latest_speedtest()
+        if not last:
+            return 0
+        due = datetime.fromisoformat(last["ts"]) + timedelta(hours=hours)
+        return min(self.RECHECK_SECONDS, max(0.0, (due - datetime.now(timezone.utc)).total_seconds()))
+
+    def _run(self) -> None:
+        time.sleep(30)  # let the first network scan finish before using the bandwidth
+        while True:
+            woken = self._wake.wait(self._seconds_until_due())
+            self._wake.clear()
+            if not (woken or (self.interval_hours() and self._seconds_until_due() == 0)):
+                continue
+            self.running = True
+            try:
+                result = speedtest.run()
+                self.store.record_speedtest(result.down_mbps, result.up_mbps, result.error)
+            except Exception:
+                log.exception("Speed test crashed")
+            finally:
+                self.running = False
+
+
 def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> Flask:
     app = Flask(__name__)
     store = DeviceStore(str(db_path))
@@ -85,8 +139,10 @@ def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> F
     notifier = Notifier(store.settings)
     monitor = Monitor(store, vendors, notifier, subnet, interval)
     monitor.start()
+    speed = SpeedTester(store)
+    speed.start()
     # The tray icon reads status and triggers scans through these.
-    app.extensions["netmon"] = SimpleNamespace(store=store, monitor=monitor, notifier=notifier)
+    app.extensions["netmon"] = SimpleNamespace(store=store, monitor=monitor, notifier=notifier, speed=speed)
 
     def body() -> dict:
         return request.get_json(silent=True) or {}
@@ -100,6 +156,7 @@ def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> F
         return jsonify(
             devices=store.devices(),
             wan=store.wan_status() | {"gateway": monitor.gateway},
+            speed={"latest": store.latest_speedtest(), "running": speed.running, "interval_hours": speed.interval_hours()},
             last_scan=store.last_scan(),
             scanning=monitor.scanning,
             subnet=str(subnet),
@@ -116,6 +173,11 @@ def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> F
     @app.get("/api/events")
     def events():
         return jsonify(events=store.recent_events(min(request.args.get("limit", 25, type=int), 200)))
+
+    @app.post("/api/speedtest")
+    def speedtest_now():
+        speed.run_now()
+        return jsonify(ok=True)
 
     @app.post("/api/scan")
     def scan():

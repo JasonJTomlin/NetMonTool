@@ -36,6 +36,13 @@
   .conn .stats { color: var(--muted); font-size: 13px; }
   .conn svg { margin-left: auto; flex-shrink: 0; }
   .conn .down .what { color: var(--danger); }
+  .conn .panel > div { min-width: 0; }
+  .conn .what, .conn .stats { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conn .spark { margin-left: auto; flex: 0 1 140px; min-width: 48px; }
+  .conn .spark svg { display: block; width: 100%; }
+  .conn .speeds { font-variant-numeric: tabular-nums; }
+  .conn .speeds b { font-weight: 600; color: var(--text); }
+  .conn #speedBtn { margin-left: auto; flex-shrink: 0; padding: 4px 10px; font-size: 12px; }
 
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
@@ -58,7 +65,7 @@
   .colmenu .move { padding: 1px 7px; font-size: 10px; }
   .colmenu .foot { display: flex; justify-content: space-between; }
   td.chevcell, th.chevcell { width: 1%; padding-right: 0; }
-  input[type=search], input[type=url] { flex: 1; min-width: 180px; font: inherit; padding: 7px 10px; border-radius: 8px;
+  input[type=search], input[type=url], select { flex: 1; min-width: 180px; font: inherit; padding: 7px 10px; border-radius: 8px;
                        border: 1px solid var(--border); background: var(--panel); color: var(--text); }
 
   .table-wrap { overflow-x: auto; }
@@ -120,7 +127,7 @@
   dialog label.check { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
   dialog label.check span small { display: block; color: var(--muted); font-size: 12px; }
   dialog .field { margin: 16px 0 6px; }
-  dialog .field input { width: 100%; }
+  dialog .field input, dialog .field select { width: 100%; }
   dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
   dialog .row .left { margin-right: auto; }
   #testResult { color: var(--muted); font-size: 13px; align-self: center; }
@@ -134,7 +141,7 @@
       <div class="sub" id="meta">Loading…</div>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap">
-      <button id="settingsBtn">Alerts…</button>
+      <button id="settingsBtn">Settings…</button>
       <button id="ackAll">Mark all seen</button>
       <button class="primary" id="scanBtn">Scan now</button>
     </div>
@@ -142,6 +149,7 @@
 
   <div class="conn">
     <div class="panel" id="internet"></div>
+    <div class="panel" id="speed"></div>
     <div class="panel" id="router"></div>
   </div>
 
@@ -177,7 +185,8 @@
 
 <dialog id="settings">
   <form method="dialog" id="settingsForm">
-    <h3>Alerts</h3>
+    <h3>Settings</h3>
+    <div class="label">Alert me when</div>
     <label class="check"><input type="checkbox" name="notify_new"><span>New devices<small>When a device joins that hasn't been seen before.</small></span></label>
     <label class="check"><input type="checkbox" name="notify_offline"><span>Watched devices go offline<small>Turn on per device with the bell. Fires after 2 missed scans in a row, and again when it's back.</small></span></label>
     <label class="check"><input type="checkbox" name="notify_internet"><span>Internet connection drops<small>When 1.1.1.1 and 8.8.8.8 stop answering, and when they're back.</small></span></label>
@@ -186,6 +195,18 @@
     <div class="field">
       <div class="sub" style="margin-bottom:4px">Webhook URL (Discord, Slack or Teams), optional</div>
       <input type="url" name="webhook_url" placeholder="https://discord.com/api/webhooks/…">
+    </div>
+    <div class="label" style="margin-top:18px">Speed test</div>
+    <div class="field" style="margin-top:4px">
+      <select name="speedtest_hours" aria-label="How often to test internet speed">
+        <option value="0">Off (only when I click Test now)</option>
+        <option value="1">Every hour</option>
+        <option value="3">Every 3 hours</option>
+        <option value="6">Every 6 hours</option>
+        <option value="12">Every 12 hours</option>
+        <option value="24">Once a day</option>
+      </select>
+      <div class="sub" style="margin-top:4px">Each test takes 10–20 seconds and transfers up to about 220 MB (less on slower connections), using Cloudflare's speed-test servers.</div>
     </div>
     <div class="row">
       <button type="button" class="left" id="testBtn">Send test alert</button>
@@ -242,9 +263,9 @@ function spark(points, w = 220, h = 36) {
     d += `${pen ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
     pen = true;
   }
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Latency over the last 24 hours, peak ${Math.round(max)} ms">
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Latency over the last 24 hours, peak ${Math.round(max)} ms">
     <line x1="0" y1="${h - 1}" x2="${w}" y2="${h - 1}" stroke="var(--border)"/>
-    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
 const EVENT_TEXT = {
@@ -298,7 +319,7 @@ async function load() {
   } catch (e) {
     $("meta").textContent = "Can't reach the netmon server.";
   }
-  pollTimer = setTimeout(load, data.scanning ? 2000 : 10000);
+  pollTimer = setTimeout(load, data.scanning || data.speed?.running ? 2000 : 10000);
 }
 
 // ---- columns. Each has a header, a cell renderer and a sort value; `desc` columns start
@@ -487,6 +508,32 @@ colList.addEventListener("drop", e => {
 });
 colList.addEventListener("dragend", () => { dragKey = null; clearDropMarks(); });
 
+// 8.45, 41.2, 312 - three significant figures reads well at every speed.
+const mbps = v => v == null ? "—" : v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+
+function renderSpeed() {
+  const s = data.speed || {}, t = s.latest, failed = t?.error;
+  const every = s.interval_hours ? `every ${s.interval_hours === 1 ? "hour" : s.interval_hours + " hours"}` : "scheduled tests off";
+  const line = s.running ? "Testing, 10–20 s…"
+    : !t ? "Not tested yet"
+    : failed ? `Last test failed ${ago(t.ts)}`
+    : `<span class="speeds">↓ <b>${mbps(t.down_mbps)}</b> · ↑ <b>${mbps(t.up_mbps)}</b> Mbps</span>`;
+  $("speed").innerHTML = `
+    <span class="dot ${s.running || !t ? "" : failed ? "down" : "on"}"></span>
+    <div><div class="what">Internet speed</div>
+    <div class="stats">${line}</div>
+    <div class="stats" ${failed ? `title="${esc(t.error)}"` : ""}>${t && !s.running ? (failed ? `${esc(t.error)} · ` : `Tested ${ago(t.ts)} · `) : ""}${every}</div></div>
+    <button id="speedBtn" ${s.running ? "disabled" : ""}>${s.running ? "Testing…" : "Test now"}</button>`;
+}
+
+$("speed").addEventListener("click", async e => {
+  if (e.target.id !== "speedBtn") return;
+  await api("/api/speedtest", { method: "POST" });
+  data.speed = { ...data.speed, running: true };
+  renderSpeed();
+  setTimeout(load, 1000);
+});
+
 function renderConnection() {
   const w = data.wan || {}, down = w.state === "down", unknown = w.state == null;
   $("internet").className = `panel ${down ? "down" : ""}`;
@@ -494,7 +541,8 @@ function renderConnection() {
     <span class="dot ${unknown ? "" : down ? "down" : "on"}"></span>
     <div><div class="what">Internet ${unknown ? "checking…" : down ? "down" : "online"}</div>
     <div class="stats">${down ? "No reply from 1.1.1.1 or 8.8.8.8" : ms(w.internet_ms)} · ${pct(w.uptime_24h)} up today</div></div>
-    ${spark(w.latency, 140, 32)}`;
+    <div class="spark">${spark(w.latency, 140, 32)}</div>`;
+  renderSpeed();
   const routerUp = w.gateway_ms != null;
   $("router").innerHTML = `
     <span class="dot ${w.gateway ? (routerUp ? "on" : "down") : ""}"></span>

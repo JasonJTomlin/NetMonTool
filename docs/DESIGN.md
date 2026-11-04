@@ -94,6 +94,7 @@ On a 9-device /24 network, a full cycle takes about 14 seconds.
 | `netmon/app.py` | `Monitor` scanner thread, alert wording, Flask routes |
 | `netmon/scanner.py` | Ping sweep, ARP table, reverse DNS, gateway and internet checks, OS hint |
 | `netmon/identify.py` | NetBIOS, mDNS/Bonjour and SSDP/UPnP lookups |
+| `netmon/speedtest.py` | Download/upload speed test against Cloudflare's speed endpoints |
 | `netmon/vendors.py` | MAC prefix to manufacturer, private-MAC detection |
 | `netmon/store.py` | SQLite schema and migrations, history, uptime, settings |
 | `netmon/notify.py` | Windows toast, macOS/Linux notifications, webhook |
@@ -154,6 +155,7 @@ strings to the second, so they sort and compare as text.
 | `samples` | Device per scan it was online in | `device_id`, `ts`, `latency_ms` |
 | `events` | Status change | `device_id` (NULL for internet events), `ts`, `kind` (`new`, `online`, `offline`, `internet_down`, `internet_up`), `ip` |
 | `wan` | Router/internet check | `ts`, `gateway_ms`, `internet_ms` (NULL = no reply) |
+| `speedtests` | Speed test | `ts`, `down_mbps`, `up_mbps`, `error` (set, with NULL speeds, when the test failed) |
 | `meta` | Key/value | `last_scan`, `internet_state`, and alert settings stored as `setting:<name>` |
 
 **Device identity.** A device is matched by MAC address, because DHCP can hand it a new IP. A
@@ -213,7 +215,24 @@ row, so a phone that naps through one scan doesn't trigger one.
 - The down alert says whether the router still answered, which separates an ISP outage from a
   router problem.
 
-**Alert settings** (the *Alerts…* dialog, stored in `meta`)
+**Speed test** (`speedtest.py`, run by `SpeedTester` in `app.py`)
+
+- Downloads from `speed.cloudflare.com/__down` and uploads to `/__up`, Cloudflare's public
+  speed-test endpoints. They need no account or key.
+- Each direction steps through 1 MB, 10 MB and 25 MB transfers until one lasts at least 2 s.
+  Small transfers mostly measure connection setup: on the development network, 1 MB read 17 Mbps
+  where 25 MB read 217 Mbps. Downloads are timed from the first byte.
+- Cloudflare refuses single downloads of 100 MB, so a line that finishes 25 MB in under 2 s
+  repeats it (up to 4 times) and pools the repeats into one sample. A test is capped at about
+  220 MB in total and takes 10–20 s. If a later step is refused, the result so far is kept.
+- `SpeedTester` has its own thread, so a test never delays a network scan. It runs every
+  `speedtest_hours` (default 3; 0 = only on *Test now*), waits 30 s after startup so the first
+  scan isn't competing for bandwidth, and rechecks the schedule every 60 s so a changed setting
+  takes effect within a minute. A failed test is stored with its error, shown in red on the
+  dashboard, and retried at the next interval.
+- There are no speed alerts yet. The dashboard shows the latest result only.
+
+**Settings** (the *Settings…* dialog, stored in `meta`)
 
 | Setting | Default | Effect |
 | --- | --- | --- |
@@ -222,6 +241,7 @@ row, so a phone that naps through one scan doesn't trigger one.
 | Internet connection drops | On | Down and restored alerts |
 | Desktop notifications | On | Deliver as a desktop notification |
 | Webhook URL | Empty | Also POST to this URL (http/https only) |
+| Speed test | Every 3 hours | How often to run the speed test: off, 1, 3, 6, 12 or 24 hours |
 
 **Delivery channels** (`notify.py`)
 
@@ -246,7 +266,8 @@ The dashboard is one static page that polls a small JSON API every 10 seconds, o
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/` | The dashboard page |
-| GET | `/api/devices` | All devices with 24h uptime, internet/router status, last scan time, scanning flag, subnet, interval |
+| GET | `/api/devices` | All devices with 24h uptime, internet/router status, latest speed test (and whether one is running), last scan time, scanning flag, subnet, interval |
+| POST | `/api/speedtest` | Run a speed test now |
 | GET | `/api/devices/<id>/history` | 24h and 7d uptime, 24h latency samples, last 15 status changes |
 | GET | `/api/events?limit=25` | Recent activity across the network (max 200) |
 | POST | `/api/scan` | Start a scan now |
@@ -261,10 +282,12 @@ The dashboard is one static page that polls a small JSON API every 10 seconds, o
 **Dashboard** (`templates/index.html`: plain HTML, CSS and JavaScript, with no build step and no
 external libraries)
 
-- **Header:** subnet, last scan time, and the *Alerts…*, *Mark all seen* and *Scan now*
+- **Header:** subnet, last scan time, and the *Settings…*, *Mark all seen* and *Scan now*
   buttons.
-- **Connection panel:** internet status, latency, today's uptime and a 24-hour latency
-  sparkline; router address and latency.
+- **Connection panel:** three boxes. *Internet* shows status, latency, today's uptime and a
+  24-hour latency sparkline. *Internet speed* shows the latest download/upload in Mbps, when it
+  was tested, the schedule, and a *Test now* button; a failed test shows red with its reason.
+  *Router* shows its address and latency.
 - **Count cards:** Known, Online, Offline, New and Watched. Each card is also a filter.
 - **Device table:** status, editable name with badges (This PC, NEW, Private MAC), IP, MAC,
   latency, 24h uptime, online for (time since it last came online), last seen, and buttons for
@@ -284,7 +307,7 @@ external libraries)
 - **Details row** (click a device): everything identified about it, 24h/7d uptime, a latency
   chart (gaps where the device was offline) and its recent status changes.
 - **Recent activity:** network-wide feed of joins, departures, returns and internet outages.
-- **Alerts dialog:** the settings above plus a *Send test alert* button.
+- **Settings dialog:** the settings above plus a *Send test alert* button.
 
 The page follows the system light/dark theme. It won't redraw while a name is being edited, and
 all device-supplied text is HTML-escaped before display.
@@ -355,6 +378,7 @@ All testing so far has been manual or done with ad hoc scripts on the developmen
 | Start with Windows | Toggled against a throwaway registry key | Write, read-back and delete work |
 | Pause alerts | Notifier test | Real alerts suppressed while paused; test alert still delivered |
 | Tray menu clicks | Not automated | Needs a manual check |
+| Speed test | Live, CLI and dashboard | First scheduled test ran 30 s after start; *Test now* gave 149 Mbps down / 37.1 up in about 15 s; a refused 100 MB download was found and replaced by repeats; failure state and schedule setting work |
 
 ## Known limitations
 
