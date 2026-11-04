@@ -266,6 +266,14 @@ external libraries)
   reverses the order. The default sort is IP; uptime, online for and last seen start high-to-low. Blank
   values always sort last, ties fall back to IP order so rows don't jump between refreshes, and
   the choice is remembered in the browser's `localStorage`.
+- **Columns menu:** a checkbox per column shows or hides it, and the order is changed by
+  dragging a row's ⠿ handle or with its ▲/▼ buttons. The buttons cover keyboard and touch, where
+  native drag-and-drop doesn't work. *Name* can move but not hide. The layout is saved in
+  `localStorage` (`netmon.columns`). Keys from an older version are dropped, and columns added
+  later are appended, so a saved layout never breaks the table. Hiding the column the table is
+  sorted by falls back to IP order. Headers are not draggable, because clicking them sorts.
+  All columns are defined in one `COLUMNS` list in `index.html` (header, cell renderer, sort
+  value), so adding a column means adding one entry.
 - **Details row** (click a device): everything identified about it, 24h/7d uptime, a latency
   chart (gaps where the device was offline) and its recent status changes.
 - **Recent activity:** network-wide feed of joins, departures, returns and internet outages.

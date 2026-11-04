@@ -43,7 +43,21 @@
   .card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .card .n { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .card .l { color: var(--muted); font-size: 13px; }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; position: relative; }
+  .colmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; width: min(300px, calc(100vw - 32px));
+             padding: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / .2); }
+  .colmenu ul { list-style: none; margin: 8px 0 12px; padding: 0; }
+  .colmenu li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+  .colmenu li:hover { background: var(--bg); }
+  .colmenu li.dragging { opacity: .4; }
+  .colmenu li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+  .colmenu li.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+  .colmenu .handle { cursor: grab; color: var(--muted); user-select: none; padding: 0 2px; }
+  .colmenu label { flex: 1; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .colmenu label small { color: var(--muted); }
+  .colmenu .move { padding: 1px 7px; font-size: 10px; }
+  .colmenu .foot { display: flex; justify-content: space-between; }
+  td.chevcell, th.chevcell { width: 1%; padding-right: 0; }
   input[type=search], input[type=url] { flex: 1; min-width: 180px; font: inherit; padding: 7px 10px; border-radius: 8px;
                        border: 1px solid var(--border); background: var(--panel); color: var(--text); }
 
@@ -141,21 +155,17 @@
 
   <div class="toolbar">
     <input type="search" id="q" placeholder="Filter by name, maker, model, IP or MAC">
+    <button id="colBtn" aria-haspopup="true" aria-expanded="false" aria-controls="colMenu">Columns</button>
+    <div class="panel colmenu" id="colMenu" hidden>
+      <div class="sub">Tick to show. Drag ⠿ or use the arrows to reorder.</div>
+      <ul id="colList"></ul>
+      <div class="foot"><button id="colReset">Reset to default</button><button id="colDone" class="primary">Done</button></div>
+    </div>
   </div>
 
   <div class="panel table-wrap">
     <table>
-      <thead><tr>
-        <th aria-sort="none"><button class="sort" data-sort="status">Status<span class="arrow"></span></button></th>
-        <th aria-sort="none"><button class="sort" data-sort="name">Name<span class="arrow"></span></button></th>
-        <th aria-sort="none"><button class="sort" data-sort="ip">IP address<span class="arrow"></span></button></th>
-        <th aria-sort="none"><button class="sort" data-sort="mac">MAC address<span class="arrow"></span></button></th>
-        <th aria-sort="none"><button class="sort" data-sort="latency">Latency<span class="arrow"></span></button></th>
-        <th aria-sort="none"><button class="sort" data-sort="uptime">Uptime 24h<span class="arrow"></span></button></th>
-        <th aria-sort="none"><button class="sort" data-sort="onlinefor" title="How long the device has been online without a break">Online for<span class="arrow"></span></button></th>
-        <th aria-sort="none"><button class="sort" data-sort="seen">Last seen<span class="arrow"></span></button></th>
-        <th></th>
-      </tr></thead>
+      <thead><tr id="headRow"></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <div class="empty" id="empty" hidden>No devices match.</div>
@@ -291,26 +301,59 @@ async function load() {
   pollTimer = setTimeout(load, data.scanning ? 2000 : 10000);
 }
 
-// ---- column sorting. `desc` columns start high-to-low on first click; blanks always sort last.
+// ---- columns. Each has a header, a cell renderer and a sort value; `desc` columns start
+// high-to-low on first click, and blanks always sort last. `locked` columns can move but not hide.
 const ipNum = x => x.ip.split(".").reduce((n, p) => n * 256 + Number(p), 0);
-const SORTS = {
-  status: { get: x => x.online ? 0 : 1 },
-  name: { get: x => x.label || fallbackName(x) },
-  ip: { get: ipNum },
-  mac: { get: x => x.mac },
-  latency: { get: x => x.online ? x.latency_ms : null },
-  uptime: { get: x => x.uptime_24h, desc: true },
-  onlinefor: { get: onlineFor, desc: true },
-  seen: { get: x => x.online ? Infinity : Date.parse(x.last_seen), desc: true },
-};
+function nameCell(x) {
+  // Second line: whatever the user's label is hiding, plus what kind of device this is.
+  const sub = [x.label && x.discovered_name, x.device_type || x.model || (x.discovered_name ? x.vendor : null)].filter(Boolean).join(" · ");
+  return `<td class="name">
+    <input value="${esc(x.label)}" placeholder="${esc(fallbackName(x))}" data-id="${x.id}" aria-label="Device name">
+    ${x.is_self ? '<span class="badge me">This PC</span>' : ""}${x.is_new ? '<span class="badge new">NEW</span>' : ""}
+    ${x.private_mac ? '<span class="badge priv" title="Randomized MAC address, common on phones">Private MAC</span>' : ""}
+    ${sub ? `<div class="host">${esc(sub)}</div>` : ""}
+  </td>`;
+}
+const COLUMNS = [
+  { key: "status", label: "Status", get: x => x.online ? 0 : 1,
+    cell: x => `<td><span class="status ${x.online ? "on" : ""}"><span class="dot"></span>${x.online ? "Online" : "Offline"}</span></td>` },
+  { key: "name", label: "Name", locked: true, get: x => x.label || fallbackName(x), cell: nameCell },
+  { key: "ip", label: "IP address", get: ipNum, cell: x => `<td class="mono">${esc(x.ip)}</td>` },
+  { key: "mac", label: "MAC address", get: x => x.mac, cell: x => `<td class="mono">${esc(x.mac || "—")}</td>` },
+  { key: "latency", label: "Latency", get: x => x.online ? x.latency_ms : null,
+    cell: x => `<td class="num">${x.online ? ms(x.latency_ms) : "—"}</td>` },
+  { key: "uptime", label: "Uptime 24h", desc: true, get: x => x.uptime_24h, cell: x => `<td class="num">${pct(x.uptime_24h)}</td>` },
+  { key: "onlinefor", label: "Online for", desc: true, title: "How long the device has been online without a break", get: onlineFor,
+    cell: x => `<td class="num" title="${x.online && x.online_since ? "Online since " + esc(new Date(x.online_since).toLocaleString()) : ""}">${onlineFor(x) == null ? "—" : duration(onlineFor(x))}</td>` },
+  { key: "seen", label: "Last seen", desc: true, get: x => x.online ? Infinity : Date.parse(x.last_seen),
+    cell: x => `<td title="${esc(x.last_seen)}">${x.online ? "now" : ago(x.last_seen)}</td>` },
+];
+const COL = Object.fromEntries(COLUMNS.map(c => [c.key, c]));
+
+// Column layout, remembered per browser. Unknown keys from an older version are dropped and
+// columns added since are appended, so a saved layout never breaks the table.
+const defaultLayout = () => ({ order: COLUMNS.map(c => c.key), hidden: [] });
+let layout = defaultLayout();
+try {
+  const saved = JSON.parse(localStorage.getItem("netmon.columns"));
+  if (saved && Array.isArray(saved.order) && Array.isArray(saved.hidden)) {
+    const order = saved.order.filter(k => COL[k]);
+    layout = {
+      order: [...new Set([...order, ...COLUMNS.map(c => c.key)])],
+      hidden: saved.hidden.filter(k => COL[k] && !COL[k].locked),
+    };
+  }
+} catch {}
+const visibleColumns = () => layout.order.filter(k => !layout.hidden.includes(k)).map(k => COL[k]);
+
 let sort = { key: "ip", dir: 1 };
 try {
   const saved = JSON.parse(localStorage.getItem("netmon.sort"));
-  if (saved && SORTS[saved.key] && Math.abs(saved.dir) === 1) sort = saved;
+  if (saved && COL[saved.key] && Math.abs(saved.dir) === 1) sort = saved;
 } catch {}
 
 function compare(a, b) {
-  const va = SORTS[sort.key].get(a), vb = SORTS[sort.key].get(b);
+  const va = COL[sort.key].get(a), vb = COL[sort.key].get(b);
   if ((va == null) !== (vb == null)) return va == null ? 1 : -1;
   if (va != null && va !== vb) {
     const order = typeof va === "string" ? va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" }) : va < vb ? -1 : 1;
@@ -327,13 +370,122 @@ function renderSortHeaders() {
   });
 }
 
+function renderHead() {
+  $("headRow").innerHTML = '<th class="chevcell"></th>' + visibleColumns().map(c =>
+    `<th aria-sort="none"><button class="sort" data-sort="${c.key}"${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.label)}<span class="arrow"></span></button></th>`
+  ).join("") + "<th></th>";
+  renderSortHeaders();
+}
+
+const saveSort = () => { try { localStorage.setItem("netmon.sort", JSON.stringify(sort)); } catch {} };
+
 document.querySelector("thead").addEventListener("click", e => {
   const key = e.target.closest("button.sort")?.dataset.sort;
   if (!key) return;
-  sort = sort.key === key ? { key, dir: -sort.dir } : { key, dir: SORTS[key].desc ? -1 : 1 };
-  try { localStorage.setItem("netmon.sort", JSON.stringify(sort)); } catch {}
+  sort = sort.key === key ? { key, dir: -sort.dir } : { key, dir: COL[key].desc ? -1 : 1 };
+  saveSort();
   render();
 });
+
+// ---- column menu
+function applyLayout(focus) {
+  try { localStorage.setItem("netmon.columns", JSON.stringify(layout)); } catch {}
+  // Sorting by a column you can't see is confusing, so fall back to IP order.
+  if (layout.hidden.includes(sort.key)) { sort = { key: "ip", dir: 1 }; saveSort(); }
+  renderHead();
+  renderColMenu();
+  render();
+  if (focus) $("colList").querySelector(focus)?.focus();
+}
+
+function renderColMenu() {
+  const n = layout.order.length;
+  $("colList").innerHTML = layout.order.map((k, i) => {
+    const c = COL[k], shown = !layout.hidden.includes(k);
+    return `<li draggable="true" data-key="${k}">
+      <span class="handle" aria-hidden="true" title="Drag to reorder">⠿</span>
+      <label><input type="checkbox" data-toggle="${k}" ${shown ? "checked" : ""} ${c.locked ? "disabled" : ""}>
+        ${esc(c.label)}${c.locked ? " <small>always shown</small>" : ""}</label>
+      <button class="move" data-move="${k}" data-dir="-1" aria-label="Move ${esc(c.label)} up" ${i === 0 ? "disabled" : ""}>▲</button>
+      <button class="move" data-move="${k}" data-dir="1" aria-label="Move ${esc(c.label)} down" ${i === n - 1 ? "disabled" : ""}>▼</button>
+    </li>`;
+  }).join("");
+}
+
+function moveColumn(key, index) {
+  const order = layout.order.filter(k => k !== key);
+  order.splice(Math.max(0, Math.min(index, order.length)), 0, key);
+  layout.order = order;
+}
+
+function setMenuOpen(open) {
+  $("colMenu").hidden = !open;
+  $("colBtn").setAttribute("aria-expanded", String(open));
+  if (open) { renderColMenu(); $("colList").querySelector("input:not([disabled])")?.focus(); }
+}
+$("colBtn").onclick = () => setMenuOpen($("colMenu").hidden);
+$("colDone").onclick = () => { setMenuOpen(false); $("colBtn").focus(); };
+$("colReset").onclick = () => { layout = defaultLayout(); applyLayout(); };
+document.addEventListener("click", e => {
+  // composedPath() is captured at dispatch, so it still holds the menu even when the clicked
+  // arrow was replaced by a re-render (and is no longer in the document).
+  if (!$("colMenu").hidden && !e.composedPath().some(n => n.id === "colMenu" || n.id === "colBtn")) setMenuOpen(false);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("colMenu").hidden) { setMenuOpen(false); $("colBtn").focus(); }
+});
+
+const colList = $("colList");
+colList.addEventListener("change", e => {
+  const key = e.target.dataset.toggle;
+  if (!key) return;
+  layout.hidden = e.target.checked ? layout.hidden.filter(k => k !== key) : [...layout.hidden, key];
+  applyLayout(`[data-toggle="${key}"]`);
+});
+colList.addEventListener("click", e => {
+  const btn = e.target.closest("button.move");
+  if (!btn) return;
+  const key = btn.dataset.move, dir = Number(btn.dataset.dir);
+  moveColumn(key, layout.order.indexOf(key) + dir);
+  const i = layout.order.indexOf(key);
+  // Keep keyboard focus on the arrow that was pressed, or its partner once it hits an end.
+  const atEnd = (dir < 0 && i === 0) || (dir > 0 && i === layout.order.length - 1);
+  applyLayout(`[data-move="${key}"][data-dir="${atEnd ? -dir : dir}"]`);
+});
+
+// Drag and drop within the menu (mouse). The arrows cover keyboard and touch.
+let dragKey = null;
+const clearDropMarks = () => colList.querySelectorAll("li").forEach(li => li.classList.remove("drop-before", "drop-after", "dragging"));
+colList.addEventListener("dragstart", e => {
+  const li = e.target.closest("li");
+  if (!li) return;
+  dragKey = li.dataset.key;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragKey);
+  li.classList.add("dragging");
+});
+colList.addEventListener("dragover", e => {
+  const li = e.target.closest("li");
+  if (!dragKey || !li) return;
+  e.preventDefault();
+  const after = e.clientY > li.getBoundingClientRect().top + li.offsetHeight / 2;
+  colList.querySelectorAll("li").forEach(x => x.classList.remove("drop-before", "drop-after"));
+  if (li.dataset.key !== dragKey) li.classList.add(after ? "drop-after" : "drop-before");
+});
+colList.addEventListener("drop", e => {
+  const li = e.target.closest("li");
+  if (!dragKey || !li) return;
+  e.preventDefault();
+  if (li.dataset.key !== dragKey) {
+    const after = e.clientY > li.getBoundingClientRect().top + li.offsetHeight / 2;
+    const target = layout.order.filter(k => k !== dragKey).indexOf(li.dataset.key);
+    moveColumn(dragKey, target + (after ? 1 : 0));
+    applyLayout();
+  }
+  dragKey = null;
+  clearDropMarks();
+});
+colList.addEventListener("dragend", () => { dragKey = null; clearDropMarks(); });
 
 function renderConnection() {
   const w = data.wan || {}, down = w.state === "down", unknown = w.state == null;
@@ -374,32 +526,20 @@ function render() {
   // Don't redraw under the user while they're editing a name.
   if (document.activeElement?.matches(".name input")) return;
 
+  const cols = visibleColumns();
   $("rows").innerHTML = shown.map(x => {
     const open = expanded.has(x.id);
-    // Second line: whatever the user's label is hiding, plus what kind of device this is.
-    const sub = [x.label && x.discovered_name, x.device_type || x.model || (x.discovered_name ? x.vendor : null)].filter(Boolean).join(" · ");
     return `
     <tr class="dev ${x.online ? "" : "off"} ${open ? "open" : ""}" data-row="${x.id}">
-      <td><span class="chev">›</span><span class="status ${x.online ? "on" : ""}"><span class="dot"></span>${x.online ? "Online" : "Offline"}</span></td>
-      <td class="name">
-        <input value="${esc(x.label)}" placeholder="${esc(fallbackName(x))}" data-id="${x.id}" aria-label="Device name">
-        ${x.is_self ? '<span class="badge me">This PC</span>' : ""}${x.is_new ? '<span class="badge new">NEW</span>' : ""}
-        ${x.private_mac ? '<span class="badge priv" title="Randomized MAC address, common on phones">Private MAC</span>' : ""}
-        ${sub ? `<div class="host">${esc(sub)}</div>` : ""}
-      </td>
-      <td class="mono">${esc(x.ip)}</td>
-      <td class="mono">${esc(x.mac || "—")}</td>
-      <td class="num">${x.online ? ms(x.latency_ms) : "—"}</td>
-      <td class="num">${pct(x.uptime_24h)}</td>
-      <td class="num" title="${x.online && x.online_since ? "Online since " + esc(new Date(x.online_since).toLocaleString()) : ""}">${onlineFor(x) == null ? "—" : duration(onlineFor(x))}</td>
-      <td title="${esc(x.last_seen)}">${x.online ? "now" : ago(x.last_seen)}</td>
+      <td class="chevcell"><span class="chev">›</span></td>
+      ${cols.map(c => c.cell(x)).join("")}
       <td class="actions">
         ${x.is_new ? `<button data-ack="${x.id}">Seen</button>` : ""}
         <button class="bell" data-watch="${x.id}" aria-pressed="${x.watch}" title="${x.watch ? "Alerting when this goes offline. Click to stop." : "Alert me when this goes offline"}">${BELL}</button>
         <button class="forget" data-forget="${x.id}" title="Remove from the list">Forget</button>
       </td>
     </tr>
-    ${open ? `<tr class="details"><td colspan="9">${details(x)}</td></tr>` : ""}`;
+    ${open ? `<tr class="details"><td colspan="${cols.length + 2}">${details(x)}</td></tr>` : ""}`;
   }).join("");
   $("empty").hidden = shown.length > 0;
 }
@@ -472,6 +612,7 @@ $("testBtn").onclick = async () => {
   $("testResult").textContent = "Sent";
 };
 
+renderHead();
 load();
 </script>
 </body>
