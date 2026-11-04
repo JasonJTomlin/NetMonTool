@@ -10,6 +10,7 @@ from flask import Flask, abort, jsonify, render_template, request
 
 from . import scanner
 from .store import DeviceStore
+from .vendors import VendorDB
 
 log = logging.getLogger("netmon")
 
@@ -17,8 +18,8 @@ log = logging.getLogger("netmon")
 class Monitor:
     """Rescans the subnet every `interval` seconds, or immediately when asked."""
 
-    def __init__(self, store: DeviceStore, subnet: ipaddress.IPv4Network, interval: int):
-        self.store, self.subnet, self.interval = store, subnet, interval
+    def __init__(self, store: DeviceStore, vendors: VendorDB, subnet: ipaddress.IPv4Network, interval: int):
+        self.store, self.vendors, self.subnet, self.interval = store, vendors, subnet, interval
         self.scanning = False
         self._wake = threading.Event()
 
@@ -29,12 +30,14 @@ class Monitor:
         self._wake.set()
 
     def _run(self) -> None:
+        self.scanning = True
+        self.vendors.load()
         while True:
             self._wake.clear()
             self.scanning = True
             try:
                 started = time.monotonic()
-                results = scanner.scan(self.subnet)
+                results = scanner.scan(self.subnet, self.vendors)
                 new_ids = self.store.record_scan(results, first_run=self.store.is_empty())
                 log.info("Scan of %s: %d online, %d new (%.1fs)",
                          self.subnet, len(results), len(new_ids), time.monotonic() - started)
@@ -48,7 +51,8 @@ class Monitor:
 def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> Flask:
     app = Flask(__name__)
     store = DeviceStore(str(db_path))
-    monitor = Monitor(store, subnet, interval)
+    vendors = VendorDB(db_path.with_name("manuf.txt"))
+    monitor = Monitor(store, vendors, subnet, interval)
     monitor.start()
 
     @app.get("/")

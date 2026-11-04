@@ -2,3 +2,4 @@
 __pycache__/
 *.pyc
 netmon.db
+manuf.txt

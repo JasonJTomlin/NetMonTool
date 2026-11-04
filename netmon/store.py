@@ -9,6 +9,7 @@ import threading
 from datetime import datetime, timezone
 
 from .scanner import ScanResult
+from .vendors import is_private_mac
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
@@ -29,6 +30,12 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 """
 
+# Details a device reports about itself. Names keep their last known value when a lookup
+# misses (NetBIOS/mDNS are UDP and occasionally drop); ping stats always reflect the latest scan.
+NAME_COLUMNS = ["netbios_name", "mdns_name", "friendly_name", "vendor", "model", "device_type", "services"]
+PING_COLUMNS = ["ttl", "latency_ms", "os_hint"]
+COLUMN_TYPES = {"ttl": "INTEGER", "latency_ms": "REAL"}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -41,6 +48,11 @@ class DeviceStore:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(SCHEMA)
+            existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(devices)")}
+            for col in NAME_COLUMNS + PING_COLUMNS:
+                if col not in existing:
+                    self._conn.execute(f"ALTER TABLE devices ADD COLUMN {col} {COLUMN_TYPES.get(col, 'TEXT')}")
+            self._conn.commit()
 
     def _find(self, result: ScanResult) -> sqlite3.Row | None:
         cur = self._conn.cursor()
@@ -60,19 +72,22 @@ class DeviceStore:
         seen, new_ids = [], []
         with self._lock, self._conn:
             for r in results:
+                details = [getattr(r, c) for c in NAME_COLUMNS + PING_COLUMNS]
                 row = self._find(r)
                 if row:
+                    sets = ", ".join([f"{c} = COALESCE(?, {c})" for c in NAME_COLUMNS] + [f"{c} = ?" for c in PING_COLUMNS])
                     self._conn.execute(
-                        """UPDATE devices SET ip = ?, mac = COALESCE(?, mac), hostname = COALESCE(?, hostname),
-                           is_self = ?, online = 1, last_seen = ? WHERE id = ?""",
-                        (r.ip, r.mac, r.hostname, int(r.is_self), now, row["id"]),
+                        f"""UPDATE devices SET ip = ?, mac = COALESCE(?, mac), hostname = COALESCE(?, hostname),
+                            is_self = ?, online = 1, last_seen = ?, {sets} WHERE id = ?""",
+                        (r.ip, r.mac, r.hostname, int(r.is_self), now, *details, row["id"]),
                     )
                     seen.append(row["id"])
                 else:
+                    cols = NAME_COLUMNS + PING_COLUMNS
                     cur = self._conn.execute(
-                        """INSERT INTO devices (mac, ip, hostname, is_self, online, is_new, first_seen, last_seen)
-                           VALUES (?, ?, ?, ?, 1, ?, ?, ?)""",
-                        (r.mac, r.ip, r.hostname, int(r.is_self), int(not first_run), now, now),
+                        f"""INSERT INTO devices (mac, ip, hostname, is_self, online, is_new, first_seen, last_seen, {", ".join(cols)})
+                            VALUES (?, ?, ?, ?, 1, ?, ?, ?, {", ".join("?" * len(cols))})""",
+                        (r.mac, r.ip, r.hostname, int(r.is_self), int(not first_run), now, now, *details),
                     )
                     seen.append(cur.lastrowid)
                     if not first_run:
@@ -92,6 +107,10 @@ class DeviceStore:
         devices = [dict(r) for r in rows]
         for d in devices:
             d["online"], d["is_new"], d["is_self"] = bool(d["online"]), bool(d["is_new"]), bool(d["is_self"])
+            d["private_mac"] = bool(d["mac"]) and is_private_mac(d["mac"])
+            mdns = (d["mdns_name"] or "").removesuffix(".local") or None
+            # Best name the device gave us, before falling back to the user's label in the UI.
+            d["discovered_name"] = d["friendly_name"] or mdns or d["netbios_name"] or d["hostname"]
         return sorted(devices, key=lambda d: tuple(int(p) for p in d["ip"].split(".")))
 
     def last_scan(self) -> str | None:

@@ -38,7 +38,7 @@
                        border: 1px solid var(--border); background: var(--panel); color: var(--text); }
   .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th, td { padding: 10px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
   tr:last-child td { border-bottom: 0; }
   tr.off td { color: var(--muted); }
@@ -50,9 +50,21 @@
   .badge.new { background: color-mix(in srgb, var(--new) 18%, transparent); color: var(--new); }
   .badge.me { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
   .name input { font: inherit; color: var(--text); background: transparent; border: 1px solid transparent;
-                border-radius: 6px; padding: 3px 6px; margin-left: -7px; width: 190px; }
+                border-radius: 6px; padding: 3px 6px; margin-left: -7px; width: 100%; min-width: 150px;
+                text-overflow: ellipsis; }
+  .name { white-space: normal; min-width: 200px; }
+  .name .host { white-space: normal; }
   .name input:hover, .name input:focus { border-color: var(--border); background: var(--bg); outline: none; }
   .host { color: var(--muted); font-size: 12px; }
+  .badge.priv { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); }
+  tr.dev { cursor: pointer; }
+  tr.dev:hover td { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .chev { display: inline-block; width: 12px; color: var(--muted); transition: transform .15s; }
+  tr.open .chev { transform: rotate(90deg); }
+  tr.details td { background: var(--bg); white-space: normal; padding: 14px 16px 16px 32px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+  dt { color: var(--muted); font-size: 13px; }
+  dd { margin: 0; word-break: break-word; }
   .actions button { padding: 3px 9px; font-size: 12px; }
   .actions button.forget:hover { border-color: var(--danger); color: var(--danger); }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
@@ -79,12 +91,12 @@
   </div>
 
   <div class="toolbar">
-    <input type="search" id="q" placeholder="Filter by name, IP or MAC">
+    <input type="search" id="q" placeholder="Filter by name, maker, model, IP or MAC">
   </div>
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Status</th><th>Name</th><th>IP address</th><th>MAC address</th><th>First seen</th><th>Last seen</th><th></th></tr></thead>
+      <thead><tr><th>Status</th><th>Name</th><th>IP address</th><th>MAC address</th><th>Latency</th><th>Last seen</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <div class="empty" id="empty" hidden>No devices match.</div>
@@ -93,6 +105,7 @@
 
 <script>
 let data = { devices: [] }, filter = "all", pollTimer;
+const expanded = new Set();
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -103,6 +116,26 @@ function ago(iso) {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+const fallbackName = x => x.discovered_name || (x.vendor ? `${x.vendor} device` : x.private_mac ? "Device with private MAC" : "Unnamed device");
+const latency = x => x.latency_ms == null ? "—" : x.latency_ms < 1 ? "<1 ms" : `${Math.round(x.latency_ms)} ms`;
+
+function details(x) {
+  const rows = [
+    ["Device type", x.device_type],
+    ["Manufacturer", x.vendor || (x.private_mac ? "Unknown: this device uses a private (randomized) MAC address, common on phones" : null)],
+    ["Model", x.model],
+    ["Device name", x.friendly_name],
+    ["mDNS / Bonjour name", x.mdns_name],
+    ["NetBIOS name", x.netbios_name],
+    ["DNS name", x.hostname],
+    ["Operating system", x.os_hint && (x.is_self ? x.os_hint : `${x.os_hint} (guessed from ping TTL ${x.ttl})`)],
+    ["Advertised services", x.services],
+    ["First seen", x.first_seen && new Date(x.first_seen).toLocaleString()],
+    ["Last seen", x.last_seen && new Date(x.last_seen).toLocaleString()],
+  ].filter(([, v]) => v);
+  return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
 }
 
 const api = (path, opts = {}) => fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -134,28 +167,35 @@ function render() {
   const q = document.getElementById("q").value.trim().toLowerCase();
   const shown = d.filter(x =>
     (filter === "all" || (filter === "online" && x.online) || (filter === "offline" && !x.online) || (filter === "new" && x.is_new)) &&
-    (!q || [x.label, x.hostname, x.ip, x.mac].some(v => (v || "").toLowerCase().includes(q))));
+    (!q || [x.label, x.discovered_name, x.vendor, x.model, x.device_type, x.ip, x.mac].some(v => (v || "").toLowerCase().includes(q))));
 
   // Don't redraw under the user while they're editing a name.
   if (document.activeElement?.matches(".name input")) return;
 
-  document.getElementById("rows").innerHTML = shown.map(x => `
-    <tr class="${x.online ? "" : "off"}">
-      <td><span class="status ${x.online ? "on" : ""}"><span class="dot"></span>${x.online ? "Online" : "Offline"}</span></td>
+  document.getElementById("rows").innerHTML = shown.map(x => {
+    const open = expanded.has(x.id);
+    // Second line: whatever the user's label is hiding, plus what kind of device this is.
+    const sub = [x.label && x.discovered_name, x.device_type || x.model || (x.discovered_name ? x.vendor : null)].filter(Boolean).join(" · ");
+    return `
+    <tr class="dev ${x.online ? "" : "off"} ${open ? "open" : ""}" data-row="${x.id}">
+      <td><span class="chev">›</span><span class="status ${x.online ? "on" : ""}"><span class="dot"></span>${x.online ? "Online" : "Offline"}</span></td>
       <td class="name">
-        <input value="${esc(x.label)}" placeholder="${esc(x.hostname || "Unnamed device")}" data-id="${x.id}" aria-label="Device name">
+        <input value="${esc(x.label)}" placeholder="${esc(fallbackName(x))}" data-id="${x.id}" aria-label="Device name">
         ${x.is_self ? '<span class="badge me">This PC</span>' : ""}${x.is_new ? '<span class="badge new">NEW</span>' : ""}
-        ${x.label && x.hostname ? `<div class="host">${esc(x.hostname)}</div>` : ""}
+        ${x.private_mac ? '<span class="badge priv" title="Randomized MAC address, common on phones">Private MAC</span>' : ""}
+        ${sub ? `<div class="host">${esc(sub)}</div>` : ""}
       </td>
       <td class="mono">${esc(x.ip)}</td>
       <td class="mono">${esc(x.mac || "—")}</td>
-      <td title="${esc(x.first_seen)}">${ago(x.first_seen)}</td>
+      <td>${x.online ? latency(x) : "—"}</td>
       <td title="${esc(x.last_seen)}">${x.online ? "now" : ago(x.last_seen)}</td>
       <td class="actions">
         ${x.is_new ? `<button data-ack="${x.id}">Seen</button>` : ""}
         <button class="forget" data-forget="${x.id}" title="Remove from the list">Forget</button>
       </td>
-    </tr>`).join("");
+    </tr>
+    ${open ? `<tr class="details"><td colspan="7">${details(x)}</td></tr>` : ""}`;
+  }).join("");
   document.getElementById("empty").hidden = shown.length > 0;
 }
 
@@ -180,6 +220,12 @@ rows.addEventListener("click", async e => {
   if (ack) { await api(`/api/devices/${ack}/ack`, { method: "POST" }); load(); }
   if (forget && confirm("Forget this device? It will reappear as new if it's seen again.")) {
     await api(`/api/devices/${forget}`, { method: "DELETE" }); load();
+  }
+  const row = e.target.closest("tr.dev");
+  if (row && !ack && !forget && !e.target.matches("input")) {
+    const id = Number(row.dataset.row);
+    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    render();
   }
 });
 rows.addEventListener("change", async e => {
