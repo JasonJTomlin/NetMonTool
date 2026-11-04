@@ -61,12 +61,16 @@ class Notifier:
     def __init__(self, settings_source):
         """`settings_source` is a callable returning the current settings dict."""
         self._settings = settings_source
+        # Set from the tray menu; lasts until unpaused or the app restarts.
+        self.paused = False
 
     def send(self, title: str, body: str, kind: str | None = None, wait: bool = False) -> None:
         """Deliver an alert on every enabled channel. `kind` ("new", "offline", "internet") is checked
         against the matching notify_* setting; None always sends (used for test messages)."""
         settings = self._settings()
-        if kind and not settings.get(f"notify_{kind}", True):
+        if kind and (self.paused or not settings.get(f"notify_{kind}", True)):
+            if self.paused:
+                log.info("Alert paused: %s - %s", title, body)
             return
         log.info("Alert: %s - %s", title, body)
         jobs = []

@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from flask import Flask, abort, jsonify, render_template, request
 
@@ -84,6 +85,8 @@ def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> F
     notifier = Notifier(store.settings)
     monitor = Monitor(store, vendors, notifier, subnet, interval)
     monitor.start()
+    # The tray icon reads status and triggers scans through these.
+    app.extensions["netmon"] = SimpleNamespace(store=store, monitor=monitor, notifier=notifier)
 
     def body() -> dict:
         return request.get_json(silent=True) or {}

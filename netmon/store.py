@@ -314,6 +314,13 @@ class DeviceStore:
             "latency": latency,
         }
 
+    def summary(self) -> dict:
+        """Cheap status for the tray icon: device counts and internet state."""
+        with self._lock:
+            online, total = self._conn.execute("SELECT COUNT(*) FILTER (WHERE online = 1), COUNT(*) FROM devices").fetchone()
+            state = self._conn.execute("SELECT value FROM meta WHERE key = 'internet_state'").fetchone()
+        return {"online": online, "total": total, "internet": state[0] if state else None}
+
     def last_scan(self) -> str | None:
         with self._lock:
             row = self._conn.execute("SELECT value FROM meta WHERE key = 'last_scan'").fetchone()

@@ -25,8 +25,9 @@ describes.
 
 - **No admin rights and no drivers.** Discovery uses only the OS `ping` and `arp` commands and
   plain UDP sockets. No Npcap/WinPcap and no raw packets.
-- **One dependency.** Flask is the only third-party package; everything else is the Python
-  standard library.
+- **Few dependencies.** The third-party packages are Flask (web app), Waitress (web server),
+  pystray and Pillow (tray icon). Discovery, identification and storage are all standard
+  library.
 - **Local and private.** Data stays in a SQLite file on the PC. By default the dashboard listens
   on 127.0.0.1 only.
 - **Web dashboard rather than a desktop GUI.** It needs no GUI toolkit and opens in any
@@ -39,9 +40,10 @@ Setup and command-line options are in the [README](../README.md).
 
 ## Architecture
 
-One Python process runs two things: a background scanner thread that loops forever, and the
-Flask web server that the dashboard polls. The two share a single SQLite database guarded by a
-lock.
+One Python process runs a background scanner thread that loops forever, and the Flask app,
+served by Waitress (8 worker threads), that the dashboard polls. The two share a single SQLite
+database guarded by a lock. In tray mode, the tray icon also lives in this process (see
+[Running in the background](#running-in-the-background)).
 
 ```mermaid
 flowchart LR
@@ -53,14 +55,17 @@ flowchart LR
     end
     notify["notify.py<br/>Windows toast, webhook"]
     store[("store.py<br/>netmon.db")]
-    flask["app.py<br/>Flask routes, port 5000"]
+    flask["app.py<br/>Flask routes on Waitress, port 5000"]
     dash["Browser dashboard<br/>index.html"]
+    tray["tray.py<br/>tray icon (optional)"]
 
     thread -- probes --> net
     thread -- alerts --> notify
     thread -- results --> store
     flask -- "reads, writes" --> store
     dash -- "JSON over HTTP" --> flask
+    tray -- "status, scan now, pause" --> store
+    tray -- "opens" --> dash
 ```
 
 **The scan cycle** (every `--interval` seconds, or at once when *Scan now* is pressed):
@@ -83,7 +88,9 @@ On a 9-device /24 network, a full cycle takes about 14 seconds.
 
 | File | Responsibility |
 | --- | --- |
-| `netmon/__main__.py` | Command-line options, subnet choice, starts the app |
+| `NetMonTool.pyw` | Console-less launcher for tray mode; re-runs itself with the project's `.venv` |
+| `netmon/__main__.py` | Command-line options, logging, single-instance check, starts Waitress (and the tray) |
+| `netmon/tray.py` | Tray icon, its menu and status, *Start with Windows* |
 | `netmon/app.py` | `Monitor` scanner thread, alert wording, Flask routes |
 | `netmon/scanner.py` | Ping sweep, ARP table, reverse DNS, gateway and internet checks, OS hint |
 | `netmon/identify.py` | NetBIOS, mDNS/Bonjour and SSDP/UPnP lookups |
@@ -282,6 +289,50 @@ external libraries)
 The page follows the system light/dark theme. It won't redraw while a name is being edited, and
 all device-supplied text is HTML-escaped before display.
 
+## Running in the background
+
+NetMonTool has two run modes sharing the same code: console mode (`python -m netmon`, logs to
+the terminal, Ctrl+C to stop) and tray mode (`--tray`, normally started through
+`NetMonTool.pyw`).
+
+**Tray mode**
+
+- Waitress runs on a background thread; pystray owns the main thread, which some platforms
+  require. *Quit* stops the icon and closes the server; the scanner thread is a daemon and ends
+  with the process.
+- **Icon:** a hub-and-spokes glyph whose hub shows status: green = internet up, red = down,
+  grey = not checked yet, amber = alerts paused. An outage stays red even while paused, so it
+  isn't missed. The tooltip reads e.g. "NetMonTool - 8/9 online - internet up" and refreshes
+  every 10 s from `store.summary()`, a cheap count query.
+- **Menu:** *Open dashboard* (also the default click action), *Scan now*, *Pause alerts*,
+  *Start with Windows*, *Quit NetMonTool*.
+- **Pause alerts** is held in memory on the `Notifier` and resets when the app restarts. While
+  paused, alerts are logged but not delivered. *Send test alert* still goes through.
+- **Logging:** under `pythonw` there is no console, so logs go to `netmon.log` beside the
+  database (rotating, 1 MB × 3 files).
+
+**Launcher (`NetMonTool.pyw`).** It runs with the project's `.venv\Scripts\pythonw.exe`, so
+there is no console window and the dependencies are always present. If Windows opens it with a
+different Python (a plain double-click), it re-launches itself with the venv's interpreter. It
+changes to its own folder first, so `netmon.db`, `manuf.txt` and `netmon.log` stay in the
+project folder wherever it was started from. (The venv's `pythonw.exe` is a small launcher that
+starts the real interpreter as a child, so Task Manager shows two `pythonw` processes for one
+instance.)
+
+**Start with Windows** writes a value named `NetMonTool` under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, pointing at the venv's `pythonw.exe` and
+the launcher. It is per user, needs no admin rights, and the menu checkbox reads it back. A
+Windows *service* was rejected: services run in session 0 and cannot show desktop
+notifications, so alert toasts would silently stop working.
+
+**Single instance.** Before starting, the app tries to connect to its own port. If something
+answers, console mode exits with a message, and tray mode opens the existing dashboard instead.
+
+**Not chosen for now: a packaged `.exe`.** PyInstaller would remove the need for Python, but
+unsigned builds are often flagged by antivirus and SmartScreen, need a rebuild after every
+change, and would have to move the data files to `%LOCALAPPDATA%`. It's worth revisiting only
+for running on other PCs.
+
 ## Testing
 
 All testing so far has been manual or done with ad hoc scripts on the development PC
@@ -298,6 +349,12 @@ All testing so far has been manual or done with ad hoc scripts on the developmen
 | Webhook | Local HTTP receiver | Correct `content`/`text` payload; alert types that are switched off are skipped |
 | Desktop toast | Test button | PowerShell reported success |
 | Dashboard | Browser | Bell, details history, activity feed and settings dialog work; no console errors |
+| Waitress | Console mode + browser | Serves the dashboard and API (`Server: waitress`); a second copy exits with a clear message |
+| Tray mode | Launcher started from another folder with system Python | Re-ran under the venv, served the dashboard, logged to `netmon.log` |
+| Tray icon | Rendered to PNG | All four states legible at 16 px |
+| Start with Windows | Toggled against a throwaway registry key | Write, read-back and delete work |
+| Pause alerts | Notifier test | Real alerts suppressed while paused; test alert still delivered |
+| Tray menu clicks | Not automated | Needs a manual check |
 
 ## Known limitations
 
@@ -316,14 +373,12 @@ All testing so far has been manual or done with ad hoc scripts on the developmen
 - **No authentication or CSRF protection.** Any web page can trigger simple POSTs such as
   *Scan now* or *Mark all seen*. Serving on `0.0.0.0` exposes the dashboard to everyone on the
   LAN.
-- **Flask's development server** is used. It is fine for one local user, but it prints a
-  warning.
 
 ## Possible next steps
 
 - Fix offline-detection lag, add device merging, and harden the API (custom header check;
   password when serving on `0.0.0.0`).
 - Unit tests for the packet parsers, vendor lookup and store, run by GitHub Actions.
-- Run in the background from a system-tray icon, or as a packaged `.exe`; switch to the
-  Waitress web server.
+- A packaged `.exe`, if NetMonTool needs to run on other PCs (see the trade-offs under
+  [Running in the background](#running-in-the-background)).
 - Wake-on-LAN, an opt-in port check, CSV export, and tags or notes per device.

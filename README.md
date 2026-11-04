@@ -10,7 +10,7 @@ out what each device is, tracks whether it's online, and alerts you when somethi
 - **Alerts** when a new device joins, a device you're watching goes offline, or the internet
   drops. Alerts arrive as Windows desktop notifications and/or in Discord, Slack or Teams.
 
-It needs no admin rights or packet-capture drivers, and Flask is its only dependency.
+It needs no admin rights or packet-capture drivers, and runs quietly in the system tray.
 
 ## Setup
 
@@ -21,12 +21,21 @@ py -m venv .venv
 
 ## Run
 
+**In the background (recommended):** double-click `NetMonTool.pyw`. A NetMonTool icon appears in
+the system tray, with no console window. Its colour shows internet status (green up, red down,
+amber alerts paused), and hovering shows how many devices are online. Right-click it for
+*Open dashboard*, *Scan now*, *Pause alerts*, *Start with Windows* and *Quit*. Logs go to
+`netmon.log`.
+
+**In a terminal:**
+
 ```bash
 .venv\Scripts\python -m netmon
 ```
 
-Then open http://127.0.0.1:5000. Click a device to see everything found about it, use the bell
-to watch it, and set up alerts with the *Alerts…* button.
+Either way, the dashboard is at http://127.0.0.1:5000. Click a device to see everything found
+about it, use the bell to watch it, and set up alerts with the *Alerts…* button. Only one copy
+runs at a time; starting a second tray copy just opens the dashboard.
 
 | Option | Default | |
 |---|---|---|
@@ -34,6 +43,7 @@ to watch it, and set up alerts with the *Alerts…* button.
 | `--interval` | `60` | Seconds between automatic scans |
 | `--host` / `--port` | `127.0.0.1` / `5000` | Where to serve the dashboard. Use `0.0.0.0` to reach it from other devices |
 | `--db` | `netmon.db` | SQLite file that remembers devices between runs |
+| `--tray` | off | Run with a tray icon instead of in the terminal (what `NetMonTool.pyw` does) |
 
 On first run the app downloads Wireshark's MAC vendor list (about 3 MB) to `manuf.txt`.
 
