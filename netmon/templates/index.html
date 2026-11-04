@@ -135,8 +135,10 @@
   /* Speed history. Series colours pass the dataviz palette checks on both panel surfaces. */
   :root { --down: #2a78d6; --up: #eb6834; }
   @media (prefers-color-scheme: dark) { :root { --down: #3987e5; --up: #d95926; } }
-  #speed { cursor: pointer; }
-  #speed:hover { border-color: var(--accent); }
+  #speed, #internet { cursor: pointer; }
+  #speed:hover, #internet:hover { border-color: var(--accent); }
+  .sd-note { color: var(--muted); font-size: 12px; margin-top: 14px; line-height: 1.5; }
+  .sd-h { font-size: 13px; font-weight: 600; margin: 18px 0 6px; }
   button.linkish { all: unset; cursor: pointer; font-weight: 600; }
   button.linkish:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   dialog.wide { width: min(940px, calc(100vw - 32px)); }
@@ -264,6 +266,18 @@
   <div id="sdBody"></div>
 </dialog>
 
+<dialog id="netDialog" class="wide" aria-labelledby="ndTitle">
+  <div class="sd-head">
+    <h3 id="ndTitle">Internet connection</h3>
+    <span class="sub" id="ndSub"></span>
+    <div class="seg" role="group" aria-label="Time range">
+      <button data-days="1">24 hours</button><button data-days="7">7 days</button><button data-days="30">30 days</button>
+    </div>
+    <button id="ndClose" class="primary">Close</button>
+  </div>
+  <div id="ndBody"></div>
+</dialog>
+
 <script>
 let data = { devices: [], wan: {} }, events = [], filter = "all", pollTimer;
 const expanded = new Set(), histories = {};
@@ -364,6 +378,7 @@ async function load() {
     render();
     expanded.forEach(loadHistory);
     if ($("speedDialog").open && data.speed?.latest?.ts !== speedHistTs) loadSpeedHistory();
+    if ($("netDialog").open && data.last_scan !== netHistScan) loadNetHistory();
   } catch (e) {
     $("meta").textContent = "Can't reach the netmon server.";
   }
@@ -616,7 +631,10 @@ const tickLabel = (ms, days) => days <= 1 ? new Date(ms).toLocaleTimeString([], 
   : new Date(ms).toLocaleDateString([], days <= 7 ? { weekday: "short", day: "numeric" } : { month: "short", day: "numeric" });
 
 async function openSpeedHistory() {
-  if (!$("speedDialog").open) $("speedDialog").showModal();
+  if (!$("speedDialog").open) {
+    $("sdBody").innerHTML = '<div class="sd-empty">Loading…</div>';
+    $("speedDialog").showModal();
+  }
   await loadSpeedHistory();
 }
 async function loadSpeedHistory() {
@@ -668,79 +686,95 @@ function renderSpeedHistory() {
   drawSpeedChart();
 }
 
-// Download and upload share one Mbps axis (same measure, so no dual axis). Lines break across
-// failed tests and across gaps of more than three scheduled intervals (e.g. the PC was off).
-function drawSpeedChart() {
-  const wrap = $("sdChart");
-  if (!wrap) return;
-  const W = Math.max(320, wrap.clientWidth), H = 272, m = { l: 44, r: 72, t: 28, b: 28 };
-  const t1 = Date.now(), t0 = t1 - speedRange * 864e5;
-  const tests = speedTests.filter(t => t.ms >= t0), ok = tests.filter(t => !t.error);
-  const step = niceStep(Math.max(10, ...ok.flatMap(t => [t.down_mbps, t.up_mbps])) / 4), max = step * 4;
-  const X = ms => m.l + (ms - t0) / (t1 - t0) * (W - m.l - m.r);
+// One line chart for both history panels: a time axis for the chosen range, ONE y axis (every
+// series shares the unit, so never a dual axis), optional shaded bands (outages) and baseline
+// ticks (failed tests, dropped checks), direct labels at each line's end, and a crosshair +
+// tooltip on the point nearest the pointer. A null value, or a gap longer than `breakGap`, breaks
+// the line rather than drawing across missing data.
+function drawLineChart(wrap, { points, series, days, unit, minMax = 10, breakGap = Infinity, bands = [], ticks = [], tooltip, label }) {
+  const W = Math.max(320, wrap.clientWidth), H = 280, m = { l: 44, r: 72, t: 28, b: 36 };
+  const t1 = Date.now(), t0 = t1 - days * 864e5;
+  const pts = points.filter(p => p.ms >= t0);
+  const vals = pts.flatMap(p => series.map(s => p[s.key])).filter(v => v != null);
+  const step = niceStep(Math.max(minMax, ...vals) / 4), max = step * 4;
+  const X = ms => m.l + (Math.max(t0, Math.min(t1, ms)) - t0) / (t1 - t0) * (W - m.l - m.r);
   const Y = v => H - m.b - v / max * (H - m.t - m.b);
-  const gap = data.speed?.interval_hours ? data.speed.interval_hours * 3 * 36e5 : Infinity;
   const line = k => {
     let d = "", prev = null;
-    for (const t of tests) {
-      if (t.error) { prev = null; continue; }
-      d += `${prev && t.ms - prev.ms <= gap ? "L" : "M"}${X(t.ms).toFixed(1)},${Y(t[k]).toFixed(1)}`;
-      prev = t;
+    for (const p of pts) {
+      if (p[k] == null) { prev = null; continue; }
+      d += `${prev && p.ms - prev.ms <= breakGap ? "L" : "M"}${X(p.ms).toFixed(1)},${Y(p[k]).toFixed(1)}`;
+      prev = p;
     }
     return d;
   };
-  const dots = ok.length <= 60;
-  const marks = k => dots ? ok.map(t => `<circle cx="${X(t.ms).toFixed(1)}" cy="${Y(t[k]).toFixed(1)}" r="4" fill="var(--${k === "down_mbps" ? "down" : "up"})" stroke="var(--panel)" stroke-width="2"/>`).join("") : "";
-  // Direct labels at the right end, nudged apart if they'd collide.
-  const last = ok.at(-1);
-  let yd = last && Y(last.down_mbps), yu = last && Y(last.up_mbps);
-  if (last && Math.abs(yd - yu) < 14) { const mid = (yd + yu) / 2; yd = mid - 7; yu = mid + 7; }
-  const yTicks = [0, 1, 2, 3, 4].map(i => i * step);
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Download and upload speed over the last ${speedRange === 1 ? "24 hours" : speedRange + " days"}">
-    ${yTicks.map(v => `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--border)"/>
-      <text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}</text>`).join("")}
-    <text x="${m.l - 8}" y="${m.t - 14}" text-anchor="end" font-size="11" fill="var(--muted)">Mbps</text>
-    ${timeTicks(t0, t1, speedRange).map(ms => `<text x="${X(ms)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">${esc(tickLabel(ms, speedRange))}</text>`).join("")}
-    ${tests.filter(t => t.error).map(t => `<line x1="${X(t.ms)}" x2="${X(t.ms)}" y1="${H - m.b}" y2="${H - m.b - 10}" stroke="var(--danger)" stroke-width="2" stroke-linecap="round"/>`).join("")}
-    <path d="${line("down_mbps")}" fill="none" stroke="var(--down)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="${line("up_mbps")}" fill="none" stroke="var(--up)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    ${marks("down_mbps")}${marks("up_mbps")}
-    ${last ? `<text x="${X(last.ms) + 10}" y="${yd + 4}" font-size="12" fill="var(--text)">↓ ${mbps(last.down_mbps)}</text>
-      <text x="${X(last.ms) + 10}" y="${yu + 4}" font-size="12" fill="var(--text)">↑ ${mbps(last.up_mbps)}</text>` : ""}
-    <g id="sdHover" visibility="hidden">
-      <line id="sdCross" y1="${m.t}" y2="${H - m.b}" stroke="var(--muted)" stroke-dasharray="3 3"/>
-      <circle id="sdHd" r="5" fill="var(--down)" stroke="var(--panel)" stroke-width="2"/>
-      <circle id="sdHu" r="5" fill="var(--up)" stroke="var(--panel)" stroke-width="2"/>
-    </g>
-    <rect id="sdHit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>
-  </svg><div class="tip" id="sdTip" hidden></div>`;
+  const dots = pts.length <= 60;
+  const ends = series.map(s => { const p = pts.findLast(q => q[s.key] != null); return p && { s, p, y: Y(p[s.key]) }; })
+    .filter(Boolean).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
 
-  // Crosshair + tooltip on the test nearest the pointer.
-  const svg = wrap.querySelector("svg"), tip = $("sdTip"), hover = $("sdHover");
-  const hide = () => { hover.setAttribute("visibility", "hidden"); tip.hidden = true; };
-  $("sdHit").addEventListener("pointerleave", hide);
-  $("sdHit").addEventListener("pointermove", e => {
-    if (!tests.length) return;
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${esc(label)}">
+    ${bands.map(b => {
+      // A short outage on a long range is a sliver, so it gets a stronger fill to stay visible.
+      const w = X(b.to) - X(b.from);
+      return `<rect x="${X(b.from)}" y="${m.t}" width="${Math.max(3, w)}" height="${H - m.t - m.b}" fill="var(--danger)" fill-opacity="${w < 8 ? 0.55 : 0.14}"/>`;
+    }).join("")}
+    ${[0, 1, 2, 3, 4].map(i => i * step).map(v => `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--border)"/>
+      <text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}</text>`).join("")}
+    <text x="${m.l - 8}" y="${m.t - 14}" text-anchor="end" font-size="11" fill="var(--muted)">${esc(unit)}</text>
+    ${timeTicks(t0, t1, days).map(ms => `<text x="${X(ms)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">${esc(tickLabel(ms, days))}</text>`).join("")}
+    ${ticks.map(ms => `<line x1="${X(ms)}" x2="${X(ms)}" y1="${H - m.b + 3}" y2="${H - m.b + 10}" stroke="var(--danger)" stroke-width="2" stroke-linecap="round"/>`).join("")}
+    ${series.map(s => `<path d="${line(s.key)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join("")}
+    ${dots ? series.map(s => pts.filter(p => p[s.key] != null).map(p =>
+      `<circle cx="${X(p.ms).toFixed(1)}" cy="${Y(p[s.key]).toFixed(1)}" r="4" fill="${s.color}" stroke="var(--panel)" stroke-width="2"/>`).join("")).join("") : ""}
+    ${ends.map(e => `<text x="${X(e.p.ms) + 10}" y="${e.y + 4}" font-size="12" fill="var(--text)">${esc(e.s.end(e.p[e.s.key]))}</text>`).join("")}
+    <g class="hover" visibility="hidden">
+      <line class="cross" y1="${m.t}" y2="${H - m.b}" stroke="var(--muted)" stroke-dasharray="3 3"/>
+      ${series.map(s => `<circle data-key="${s.key}" r="5" fill="${s.color}" stroke="var(--panel)" stroke-width="2"/>`).join("")}
+    </g>
+    <rect class="hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>
+  </svg><div class="tip" hidden></div>`;
+
+  const svg = wrap.querySelector("svg"), tip = wrap.querySelector(".tip"), hover = wrap.querySelector(".hover"), hit = wrap.querySelector(".hit");
+  hit.addEventListener("pointerleave", () => { hover.setAttribute("visibility", "hidden"); tip.hidden = true; });
+  hit.addEventListener("pointermove", e => {
+    if (!pts.length) return;
     const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width;
     const ms = t0 + (x - m.l) / (W - m.l - m.r) * (t1 - t0);
-    const t = tests.reduce((a, b) => Math.abs(b.ms - ms) < Math.abs(a.ms - ms) ? b : a);
-    const cx = X(t.ms);
-    $("sdCross").setAttribute("x1", cx); $("sdCross").setAttribute("x2", cx);
-    $("sdHd").setAttribute("visibility", t.error ? "hidden" : "visible");
-    $("sdHu").setAttribute("visibility", t.error ? "hidden" : "visible");
-    if (!t.error) {
-      $("sdHd").setAttribute("cx", cx); $("sdHd").setAttribute("cy", Y(t.down_mbps));
-      $("sdHu").setAttribute("cx", cx); $("sdHu").setAttribute("cy", Y(t.up_mbps));
-    }
+    const p = pts.reduce((a, b) => Math.abs(b.ms - ms) < Math.abs(a.ms - ms) ? b : a), cx = X(p.ms);
+    const cross = hover.querySelector(".cross");
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx);
+    hover.querySelectorAll("circle").forEach(c => {
+      const v = p[c.dataset.key];
+      c.setAttribute("visibility", v == null ? "hidden" : "visible");
+      if (v != null) { c.setAttribute("cx", cx); c.setAttribute("cy", Y(v)); }
+    });
     hover.setAttribute("visibility", "visible");
-    tip.innerHTML = `<div class="sub">${esc(when2(t.ms))}</div>` + (t.error
-      ? `<div><span style="color:var(--danger)">●</span> Test failed: ${esc(t.error)}</div>`
-      : `<div><span class="key" style="background:var(--down)"></span>Download <b>${mbps(t.down_mbps)} Mbps</b></div>
-         <div><span class="key" style="background:var(--up)"></span>Upload <b>${mbps(t.up_mbps)} Mbps</b></div>`);
+    tip.innerHTML = tooltip(p);
     tip.hidden = false;
     const px = cx * r.width / W, flip = px > r.width - tip.offsetWidth - 24;
     tip.style.left = `${flip ? px - tip.offsetWidth - 12 : px + 12}px`;
     tip.style.top = `${m.t * r.height / H}px`;
+  });
+}
+
+const rangeName = days => ({ 1: "24 hours", 7: "7 days", 30: "30 days" }[days]);
+const keyed = (color, text) => `<div><span class="key" style="background:${color}"></span>${text}</div>`;
+
+// Lines break across failed tests and across gaps of more than three scheduled intervals.
+function drawSpeedChart() {
+  const wrap = $("sdChart");
+  if (!wrap) return;
+  drawLineChart(wrap, {
+    points: speedTests.map(t => ({ ms: t.ms, t, down: t.error ? null : t.down_mbps, up: t.error ? null : t.up_mbps })),
+    series: [{ key: "down", color: "var(--down)", end: v => `↓ ${mbps(v)}` }, { key: "up", color: "var(--up)", end: v => `↑ ${mbps(v)}` }],
+    days: speedRange, unit: "Mbps",
+    breakGap: data.speed?.interval_hours ? data.speed.interval_hours * 3 * 36e5 : Infinity,
+    ticks: speedTests.filter(t => t.error).map(t => t.ms),
+    label: `Download and upload speed over the last ${rangeName(speedRange)}`,
+    tooltip: ({ t }) => `<div class="sub">${esc(when2(t.ms))}</div>` + (t.error
+      ? `<div><span style="color:var(--danger)">●</span> Test failed: ${esc(t.error)}</div>`
+      : keyed("var(--down)", `Download <b>${mbps(t.down_mbps)} Mbps</b>`) + keyed("var(--up)", `Upload <b>${mbps(t.up_mbps)} Mbps</b>`)),
   });
 }
 
@@ -751,14 +785,119 @@ document.querySelectorAll("#speedDialog .seg button").forEach(b => b.onclick = (
 });
 $("sdClose").onclick = () => $("speedDialog").close();
 $("sdTest").onclick = startSpeedTest;
-addEventListener("resize", () => { if ($("speedDialog").open) drawSpeedChart(); });
+addEventListener("resize", () => {
+  if ($("speedDialog").open) drawSpeedChart();
+  if ($("netDialog").open) drawNetChart();
+});
+
+// ---- internet connection history
+let netRange = 1, net = null, netHistScan;
+try { const r = Number(localStorage.getItem("netmon.netRange")); if ([1, 7, 30].includes(r)) netRange = r; } catch {}
+const durText = s => s < 60 ? `${Math.round(s)}s` : duration(s * 1000);
+
+$("internet").addEventListener("click", () => openNetHistory());
+async function openNetHistory() {
+  if (!$("netDialog").open) {
+    $("ndBody").innerHTML = '<div class="sd-empty">Loading…</div>';
+    $("netDialog").showModal();
+  }
+  await loadNetHistory();
+}
+async function loadNetHistory() {
+  document.querySelectorAll("#netDialog .seg button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.days) === netRange)));
+  net = await (await api(`/api/internet?days=${netRange}`)).json();
+  net.points = net.buckets.map(b => ({ ...b, ms: Date.parse(b.ts) }));
+  netHistScan = data.last_scan;
+  renderNetHistory();
+}
+
+function renderNetHistory() {
+  const n = net, range = rangeName(netRange);
+  $("ndSub").textContent = n.state === "down" ? "Down now" : n.state === "up" ? "Online now" : "Checking…";
+  if (!n.checks) {
+    $("ndBody").innerHTML = `<div class="sd-empty">No internet checks in the last ${range} yet. They run with every network scan.</div>`;
+    return;
+  }
+  const down = n.state === "down", sinceMs = n.since && Date.now() - Date.parse(n.since);
+  const outages = n.outages.length, dropped = n.failed_checks / n.checks;
+  const tiles = [
+    stat("Status", `<span style="color:var(--${down ? "danger" : "online"})">●</span> ${down ? "Down" : n.state === "up" ? "Online" : "Checking"}`,
+      n.since ? `${down ? "down" : "up"} for ${duration(sinceMs)}, since ${when(n.since)}` : ""),
+    stat(`Uptime, ${range}`, pct(n.uptime), outages ? `${outages} outage${outages === 1 ? "" : "s"} · ${durText(n.down_seconds)} down` : "no outages"),
+    stat("Latency", `${ms(n.latency.median)} <small>typical</small>`,
+      `95% under ${ms(n.latency.p95)} · jitter ${ms(n.latency.jitter)}`),
+    stat("Dropped checks", pct(dropped), `${n.failed_checks.toLocaleString()} of ${n.checks.toLocaleString()} got no reply`),
+    stat("Router", `${ms(n.router.median)} <small>typical</small>`, `answered ${pct(n.router.answered)} of checks`),
+  ];
+  const cause = o => o.router_answered
+    ? ["Answering", "Internet provider — your router was fine"]
+    : ["Not answering", "Router or local network (or this PC's connection)"];
+  $("ndBody").innerHTML = `
+    <div class="tiles">${tiles.join("")}</div>
+    <div class="legend">
+      <span><span class="key" style="background:var(--down)"></span>Internet latency</span>
+      <span><span class="key" style="background:var(--up)"></span>Router latency</span>
+      <span><span class="key" style="background:var(--danger);opacity:.35"></span>Outage</span>
+      <span><span class="key" style="background:var(--danger);width:3px"></span>Dropped check</span>
+    </div>
+    <div class="chart-wrap" id="ndChart"></div>
+    <div class="sd-h">Outages, ${range}</div>
+    ${outages ? `<div class="sd-table" style="margin-top:0"><table>
+      <thead><tr><th>Started</th><th>Ended</th><th>Lasted</th><th>Router</th><th>Likely cause</th></tr></thead>
+      <tbody>${n.outages.map(o => {
+        const [router, why] = cause(o), end = o.end ? Date.parse(o.end) : Date.now();
+        return `<tr><td>${esc(when2(Date.parse(o.start)))}</td><td>${o.end ? esc(when2(end)) : "<b>Still down</b>"}</td>
+          <td class="num">${durText((end - Date.parse(o.start)) / 1000)}</td><td>${router}</td><td>${why}</td></tr>`;
+      }).join("")}</tbody></table></div>`
+      : `<div class="sub">None. Every stretch of checks got replies (single dropped checks don't count as outages).</div>`}
+    <div class="sd-note">
+      <b>How this is measured:</b> with every network scan (every ${n.interval} s), NetMonTool pings
+      ${n.targets.map(esc).join(", falling back to ")} for the internet, and your router${n.gateway ? ` at ${esc(n.gateway)}` : ""}.
+      One unanswered check is a <i>dropped check</i>; 2 or more in a row is an <i>outage</i>, the same rule as the
+      "internet down" alert. If the router kept answering during an outage, the problem was beyond your home network.
+      <i>Typical</i> is the median reply time, <i>95% under</i> shows how bad the slow moments get, and <i>jitter</i>
+      is the average change between one reply and the next (high jitter makes calls and games stutter).
+      Time when NetMonTool wasn't running isn't counted either way.
+    </div>`;
+  drawNetChart();
+}
+
+function drawNetChart() {
+  const wrap = $("ndChart");
+  if (!wrap || !net) return;
+  const bucket = netRange * 864e5 / 360, outageMs = net.outages.map(o => [Date.parse(o.start), o.end ? Date.parse(o.end) : Date.now()]);
+  const inOutage = t => outageMs.some(([a, b]) => t >= a - bucket && t <= b + bucket);
+  drawLineChart(wrap, {
+    points: net.points.map(p => ({ ...p, inet: p.internet_ms, gw: p.gateway_ms })),
+    series: [{ key: "inet", color: "var(--down)", end: v => `${ms(v)}` }, { key: "gw", color: "var(--up)", end: v => `${ms(v)}` }],
+    days: netRange, unit: "ms", minMax: 20,
+    breakGap: bucket * 2.5,
+    bands: outageMs.map(([from, to]) => ({ from, to })),
+    ticks: net.points.filter(p => p.failed && !inOutage(p.ms)).map(p => p.ms),
+    label: `Internet and router latency over the last ${rangeName(netRange)}`,
+    tooltip: p => {
+      const span = netRange === 1 ? `${new Date(p.ms - bucket / 2).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}–${new Date(p.ms + bucket / 2).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : when2(p.ms);
+      return `<div class="sub">${esc(span)}${p.checks > 1 ? ` · average of ${p.checks} checks` : ""}</div>`
+        + (p.inet != null ? keyed("var(--down)", `Internet <b>${ms(p.inet)}</b>`) : "")
+        + (p.gw != null ? keyed("var(--up)", `Router <b>${ms(p.gw)}</b>`) : "")
+        + (p.failed ? `<div><span style="color:var(--danger)">●</span> ${p.failed} of ${p.checks} check${p.checks === 1 ? "" : "s"} got no reply</div>` : "");
+    },
+  });
+}
+
+document.querySelectorAll("#netDialog .seg button").forEach(b => b.onclick = () => {
+  netRange = Number(b.dataset.days);
+  try { localStorage.setItem("netmon.netRange", String(netRange)); } catch {}
+  loadNetHistory();
+});
+$("ndClose").onclick = () => $("netDialog").close();
 
 function renderConnection() {
   const w = data.wan || {}, down = w.state === "down", unknown = w.state == null;
   $("internet").className = `panel ${down ? "down" : ""}`;
   $("internet").innerHTML = `
     <span class="dot ${unknown ? "" : down ? "down" : "on"}"></span>
-    <div><div class="what">Internet ${unknown ? "checking…" : down ? "down" : "online"}</div>
+    <div><div class="what"><button class="linkish" id="netOpen" title="Show connection history">Internet ${unknown ? "checking…" : down ? "down" : "online"} ›</button></div>
     <div class="stats">${down ? "No reply from 1.1.1.1 or 8.8.8.8" : ms(w.internet_ms)} · ${pct(w.uptime_24h)} up today</div></div>
     <div class="spark">${spark(w.latency, 140, 32)}</div>`;
   renderSpeed();

@@ -267,6 +267,7 @@ The dashboard is one static page that polls a small JSON API every 10 seconds, o
 | --- | --- | --- |
 | GET | `/` | The dashboard page |
 | GET | `/api/devices` | All devices with 24h uptime, internet/router status, latest speed test (and whether one is running), last scan time, scanning flag, subnet, interval |
+| GET | `/api/internet?days=7` | Internet/router history for 1–30 days: status, uptime, outages with likely cause, latency stats, bucketed latency series |
 | GET | `/api/speedtests?days=7` | Every speed test in the last 1–30 days, oldest first, including failures |
 | POST | `/api/speedtest` | Run a speed test now |
 | GET | `/api/devices/<id>/history` | 24h and 7d uptime, 24h latency samples, last 15 status changes |
@@ -289,6 +290,28 @@ external libraries)
   24-hour latency sparkline. *Internet speed* shows the latest download/upload in Mbps, when it
   was tested, the schedule, and a *Test now* button; a failed test shows red with its reason.
   *Router* shows its address and latency.
+- **Internet connection history** (click the *Internet* box, or its title from the keyboard):
+  a panel like the speed history, built from the `wan` checks by `store.internet_history()`
+  and served at `GET /api/internet?days=N`.
+    - **Tiles:** current status and how long it has lasted (from the last `internet_up` or
+      `internet_down` event); uptime with the outage count and total downtime; typical
+      (median) latency with its 95th percentile and jitter (mean change between consecutive
+      replies); dropped checks; and router latency with how often it answered.
+    - **Outages:** runs of 2 or more unanswered checks in a row, the same rule as the alert.
+      A single miss is a *dropped check*. Each outage records whether the router kept answering
+      for at least half of it, which gives the *likely cause*: the internet provider, or the
+      router and local network.
+    - **Chart:** internet and router latency on one ms axis, averaged into 360 time buckets
+      (4 minutes at 24 hours, about 2 hours at 30 days), so a month is about 400 points
+      instead of about 43,000. Outages are red bands (stronger when only a sliver wide), and
+      buckets with dropped checks get red ticks under the baseline. The hover readout shows the
+      bucket's time span, averages and unanswered checks.
+    - **Explainer note:** an in-panel note says what's pinged, how often, and what each number
+      means.
+    - **Time when NetMonTool wasn't running** counts as neither up nor down, and it breaks the
+      line.
+- Both panels draw with one shared `drawLineChart()`: a time axis, one y axis, bands, baseline
+  ticks, direct end labels, and a crosshair tooltip.
 - **Speed history** (click the *Internet speed* box, or its title from the keyboard): a large
   panel with a 24 hours / 7 days / 30 days range switch (remembered per browser) and its own
   *Test now*.
@@ -396,6 +419,7 @@ All testing so far has been manual or done with ad hoc scripts on the developmen
 | Pause alerts | Notifier test | Real alerts suppressed while paused; test alert still delivered |
 | Tray menu clicks | Not automated | Needs a manual check |
 | Speed test | Live, CLI and dashboard | First scheduled test ran 30 s after start; *Test now* gave 149 Mbps down / 37.1 up in about 15 s; a refused 100 MB download was found and replaced by repeats; failure state and schedule setting work |
+| Internet history | Real database (69 checks) + test database seeded with a week of per-minute checks incl. a provider outage, a router outage, dropped checks and a 6 h gap | Status, uptime, both outages with correct likely cause, latency stats, gap break, bands, tick marks and hover readout all correct; speed panel unchanged after moving to the shared chart drawer; no console errors |
 | Speed history | Browser, test database seeded with a week of sample results | Opens by mouse and keyboard; all three ranges, hover readout, line breaks at failures, table and tiles correct; 15/30-minute schedules save, label and time correctly; no console errors |
 
 ## Known limitations

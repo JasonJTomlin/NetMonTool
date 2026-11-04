@@ -338,6 +338,83 @@ class DeviceStore:
                                       (_ago(days=days),)).fetchall()
         return [dict(r) for r in rows]
 
+    def internet_history(self, days: float, buckets: int = 360) -> dict:
+        """Uptime, latency, outages and a bucketed latency series for the internet/router checks.
+
+        Everything is measured over checks that actually ran: time when NetMonTool wasn't running
+        counts neither as up nor down.
+        """
+        since = _ago(days=days)
+        with self._lock:
+            rows = self._conn.execute("SELECT ts, gateway_ms, internet_ms FROM wan WHERE ts >= ? ORDER BY id",
+                                      (since,)).fetchall()
+            change = self._conn.execute(
+                "SELECT ts, kind FROM events WHERE kind IN ('internet_up', 'internet_down') ORDER BY ts DESC LIMIT 1").fetchone()
+            state = self._conn.execute("SELECT value FROM meta WHERE key = 'internet_state'").fetchone()
+            first = self._conn.execute("SELECT MIN(ts) FROM wan").fetchone()[0]
+
+        t0 = datetime.fromisoformat(since).timestamp()
+        width = days * 86400 / buckets
+        series = [{"n": 0, "failed": 0, "inet": [], "gw": []} for _ in range(buckets)]
+        latencies, gw_latencies, jitter = [], [], []
+        outages, run, prev_ms = [], [], None
+
+        def close_run(end_ts):
+            # One missed reply is a dropped check; an outage needs INTERNET_DOWN_AFTER in a row,
+            # the same rule that raises the "internet down" alert.
+            if len(run) >= INTERNET_DOWN_AFTER:
+                router_up = sum(1 for r in run if r["gateway_ms"] is not None) / len(run)
+                outages.append({"start": run[0]["ts"], "end": end_ts, "checks": len(run), "router_answered": router_up >= 0.5})
+
+        for r in rows:
+            i = min(buckets - 1, max(0, int((datetime.fromisoformat(r["ts"]).timestamp() - t0) / width)))
+            b = series[i]
+            b["n"] += 1
+            if r["gateway_ms"] is not None:
+                b["gw"].append(r["gateway_ms"])
+                gw_latencies.append(r["gateway_ms"])
+            if r["internet_ms"] is None:
+                b["failed"] += 1
+                run.append(r)
+                continue
+            b["inet"].append(r["internet_ms"])
+            latencies.append(r["internet_ms"])
+            if prev_ms is not None:
+                jitter.append(abs(r["internet_ms"] - prev_ms))
+            prev_ms = r["internet_ms"]
+            if run:
+                close_run(r["ts"])
+                run = []
+        if run:
+            close_run(None)  # still going
+
+        def pct(values, p):
+            if not values:
+                return None
+            s = sorted(values)
+            return s[min(len(s) - 1, int(round(p / 100 * (len(s) - 1))))]
+
+        avg = lambda v: round(sum(v) / len(v), 1) if v else None
+        total, failed = len(rows), sum(1 for r in rows if r["internet_ms"] is None)
+        down_seconds = sum(
+            ((datetime.fromisoformat(o["end"]) if o["end"] else datetime.now(timezone.utc))
+             - datetime.fromisoformat(o["start"])).total_seconds() for o in outages)
+        return {
+            "state": state[0] if state else None,
+            "since": change["ts"] if change else first,
+            "checks": total,
+            "failed_checks": failed,
+            "uptime": (total - failed) / total if total else None,
+            "outages": outages[::-1],
+            "down_seconds": down_seconds,
+            "latency": {"median": pct(latencies, 50), "p95": pct(latencies, 95), "jitter": avg(jitter)},
+            "router": {"median": pct(gw_latencies, 50),
+                       "answered": len(gw_latencies) / total if total else None},
+            "buckets": [{"ts": datetime.fromtimestamp(t0 + (i + 0.5) * width, timezone.utc).isoformat(timespec="seconds"),
+                         "checks": b["n"], "failed": b["failed"], "internet_ms": avg(b["inet"]), "gateway_ms": avg(b["gw"])}
+                        for i, b in enumerate(series) if b["n"]],
+        }
+
     def summary(self) -> dict:
         """Cheap status for the tray icon: device counts and internet state."""
         with self._lock:

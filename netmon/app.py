@@ -174,6 +174,13 @@ def create_app(db_path: Path, subnet: ipaddress.IPv4Network, interval: int) -> F
     def events():
         return jsonify(events=store.recent_events(min(request.args.get("limit", 25, type=int), 200)))
 
+    @app.get("/api/internet")
+    def internet_history():
+        days = min(max(request.args.get("days", 7, type=float), 1 / 24), HISTORY_DAYS)
+        return jsonify(store.internet_history(days) | {
+            "days": days, "gateway": monitor.gateway, "targets": scanner.INTERNET_TARGETS, "interval": interval,
+        })
+
     @app.get("/api/speedtests")
     def speedtest_history():
         days = min(max(request.args.get("days", 7, type=float), 1 / 24), HISTORY_DAYS)

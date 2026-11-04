@@ -6,7 +6,9 @@ out what each device is, tracks whether it's online, and alerts you when somethi
 - **Discovers devices** with their IP address, MAC address, manufacturer and, where the device
   reports one, its name and model.
 - **Tracks status:** online/offline, latency, 24-hour and 7-day uptime, and a log of changes.
-- **Watches your connection:** checks the router and the internet on every scan, and tests
+- **Watches your connection:** checks the router and the internet on every scan. Click the
+  *Internet* box for uptime, outages (and whether your provider or your router was to
+  blame), latency and dropped checks over time. It also tests
   download/upload speed on a schedule you choose (every 15 minutes to once a day) or on
   demand. Click the *Internet speed* box for a chart and history of your speeds over time.
 - **Alerts** when a new device joins, a device you're watching goes offline, or the internet
