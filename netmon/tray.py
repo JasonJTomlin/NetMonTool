@@ -4,6 +4,7 @@ The web server runs on a background thread; pystray owns the main thread (some p
 """
 
 import logging
+import os
 import platform
 import sys
 import threading
@@ -134,5 +135,12 @@ def run_tray(ctx: SimpleNamespace, server, url: str) -> None:
     log.info("Tray icon started; dashboard at %s", url)
     icon.run(setup=status_loop)
 
+    # Let in-flight dashboard requests finish before closing the socket; closing first makes
+    # Waitress's worker threads fail on a dead trigger socket and spill tracebacks into the log.
+    server.task_dispatcher.shutdown(timeout=3)
     server.close()
     log.info("NetMonTool stopped")
+    # Exit now rather than waiting on a network scan's worker pool (up to ~15 s). Every database
+    # write is its own transaction, so stopping mid-scan loses at most that scan.
+    logging.shutdown()
+    os._exit(0)

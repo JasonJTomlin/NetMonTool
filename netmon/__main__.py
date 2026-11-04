@@ -10,6 +10,7 @@ from waitress.server import create_server
 
 from . import scanner
 from .app import create_app
+from .notify import desktop_notification
 
 log = logging.getLogger("netmon")
 
@@ -49,9 +50,12 @@ def main() -> None:
 
     if already_running(args.host, args.port):
         if args.tray:
-            # Launched again (e.g. a second double-click): just bring up the running dashboard.
+            # Launched again (e.g. a second double-click): bring up the running dashboard, and say
+            # why, since the copy that's running may be a terminal one with no tray icon.
             log.info("Already running at %s; opening the dashboard instead", url)
             webbrowser.open(url)
+            desktop_notification("NetMonTool is already running",
+                                 f"Opened its dashboard. To start the tray icon, first quit the copy using {url}.")
             return
         parser.exit(1, f"Something is already running at {url} (another NetMonTool?). Use --port to pick another.\n")
 

@@ -389,7 +389,13 @@ Windows *service* was rejected: services run in session 0 and cannot show deskto
 notifications, so alert toasts would silently stop working.
 
 **Single instance.** Before starting, the app tries to connect to its own port. If something
-answers, console mode exits with a message, and tray mode opens the existing dashboard instead.
+answers, console mode exits with a message. Tray mode opens the existing dashboard and shows a
+"NetMonTool is already running" notification, because the running copy may be a terminal one
+with no tray icon, and a silent browser tab doesn't explain why no icon appeared.
+
+**Quitting.** *Quit* stops the icon, lets in-flight dashboard requests finish (Waitress's task
+dispatcher is shut down first, then the server is closed), flushes the log, and exits at once
+instead of waiting for a running scan's worker pool.
 
 **Not chosen for now: a packaged `.exe`.** PyInstaller would remove the need for Python, but
 unsigned builds are often flagged by antivirus and SmartScreen, need a rebuild after every
